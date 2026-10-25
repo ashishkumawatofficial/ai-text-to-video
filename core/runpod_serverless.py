@@ -127,6 +127,12 @@ class RunPodServerlessClient:
     def endpoint_url(self) -> str:
         return f"{self.BASE_URL}/{self.endpoint_id}"
 
+    def check_health(self) -> Dict[str, Any]:
+        """Checks the operational status and worker availability of this endpoint."""
+        from dataclasses import asdict
+        report = check_serverless_health(self.endpoint_id, self.api_key)
+        return asdict(report)
+
     def run_job(self, workflow: Dict[str, Any], images: Optional[List[Dict[str, str]]] = None) -> str:
         """Asynchronously submits a ComfyUI workflow to the serverless worker queue."""
         if not self.is_available():

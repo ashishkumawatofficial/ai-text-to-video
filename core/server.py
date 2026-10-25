@@ -599,37 +599,70 @@ async def _render_single_beat_core(
         if os.path.exists(p):
             img_disk_path = p
 
-    # If backend is serverless and available
+    # 1. If backend is serverless and available
     serverless_client = RunPodServerlessClient()
     use_serverless = (backend == "serverless" or backend == "auto") and serverless_client.is_available()
 
     if use_serverless:
-        from core.models import SceneBeatPlan
-        scene_plan = SceneBeatPlan(
-            beat_index=card.beat_index + 1,
-            visual_prompt=card.visual_prompt,
-            speaker=card.speaker,
-            dialogue_text=card.dialogue_text,
-            voice_persona=card.voice_actor,
-            duration_sec=card.duration_seconds,
-            camera_movement=card.camera_motion,
-            keyframe_image_path=img_disk_path,
-            start_frame_path=img_disk_path if (card.is_chained or card.is_custom_image) else None,
-            conditioning_mode=ConditioningMode.START_FRAME_ONLY if (card.is_chained or card.is_custom_image) else ConditioningMode.PURE_T2V,
+        from core.runpod_client import build_wan3_workflow_payload
+        from core.models import Wan3WorkflowConfig, VideoAspectRatio, ASPECT_RATIO_RESOLUTIONS
+        from core.runpod_serverless import RunPodServerlessError, calculate_safe_video_frames, ensure_video_duration_coverage
+
+        dim = ASPECT_RATIO_RESOLUTIONS.get(VideoAspectRatio(session.aspect_ratio), (1920, 1080))
+        if dim[0] > dim[1]:
+            render_w, render_h = 832, 480
+        elif dim[0] < dim[1]:
+            render_w, render_h = 480, 832
+        else:
+            render_w, render_h = 640, 640
+
+        safe_frames = calculate_safe_video_frames(card.duration_seconds, fps=16.0)
+        init_image = img_disk_path if (card.is_chained or card.is_custom_image) else None
+
+        wan_cfg = Wan3WorkflowConfig(
+            prompt=card.visual_prompt,
+            negative_prompt="blurry, low quality, distorted anatomy, jitter, artifacts, realistic photography, inconsistent clothing, style drift",
+            width=render_w,
+            height=render_h,
+            duration_frames=safe_frames,
+            steps=12,
+            reference_images=[init_image] if init_image else [],
         )
+        workflow = build_wan3_workflow_payload(wan_cfg)
+
         try:
-            rendered = await serverless_client.execute_video_job(
-                beat=scene_plan,
-                output_dir=temp_dir,
-                aspect_ratio=session.aspect_ratio,
-            )
-            from core.runpod_serverless import ensure_video_duration_coverage
+            dest_video = os.path.join(temp_dir, f"serverless_beat_{card.beat_index}_{session.session_id[:8]}.mp4")
+            job_id = await asyncio.to_thread(serverless_client.run_job, workflow)
+            poll_res = await asyncio.to_thread(serverless_client.poll_job, job_id)
+            output_payload = poll_res.get("output")
+            if not output_payload:
+                raise RunPodServerlessError(f"Serverless job {job_id} returned empty output")
+            rendered = serverless_client.parse_and_download_output(output_payload, dest_video)
             rendered = ensure_video_duration_coverage(rendered, card.duration_seconds)
             return rendered
         except Exception as e:
-            print(f"⚠️ Serverless single-beat execution failed ({e}). Cascading to local plate.")
+            print(f"⚠️ Serverless single-beat execution failed ({e}). Cascading to next tier.")
 
-    # Local / Mock video plate generation
+    # 2. Dedicated ComfyUI Pod execution
+    if backend == "pod" and director and getattr(director, "comfy_client", None):
+        try:
+            from core.visual_router import route_and_execute_beat
+            from core.models import SceneBeat
+            temp_beat = SceneBeat(
+                beat_index=card.beat_index + 1,
+                visual_prompt=card.visual_prompt,
+                duration_sec=card.duration_seconds,
+                camera_movement=card.camera_motion,
+                conditioning_mode="start_frame_only" if (card.is_chained or card.is_custom_image) else "pure_t2v",
+                start_frame_path=img_disk_path if (card.is_chained or card.is_custom_image) else None,
+            )
+            route_and_execute_beat(temp_beat, output_video_path=out_video_path, comfy_client=director.comfy_client, backend="pod")
+            if temp_beat.output_video_path and os.path.exists(temp_beat.output_video_path):
+                return temp_beat.output_video_path
+        except Exception as e:
+            print(f"⚠️ Pod single-beat execution failed ({e}). Cascading to local plate.")
+
+    # 3. Local / Mock video plate generation
     if not img_disk_path or not os.path.exists(img_disk_path):
         from core.local_visual_mock import generate_local_keyframe, get_cached_keyframe_path
         dim = (1280, 720) if session.aspect_ratio == "16:9" else (720, 1280)
@@ -647,6 +680,7 @@ async def _render_single_beat_core(
     # Generate MP4 using OpenCV from keyframe image
     import cv2
     import numpy as np
+    import subprocess
 
     img = cv2.imread(img_disk_path)
     if img is None:
@@ -660,8 +694,9 @@ async def _render_single_beat_core(
 
     fps = 16.0
     total_frames = max(16, int(round(card.duration_seconds * fps)))
+    raw_video_path = os.path.join(temp_dir, f"raw_scene_{card.beat_index + 1}_{session.session_id[:8]}.mp4")
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    writer = cv2.VideoWriter(out_video_path, fourcc, fps, (w, h))
+    writer = cv2.VideoWriter(raw_video_path, fourcc, fps, (w, h))
 
     motion = (card.camera_motion or "push_in").lower()
     for frame_idx in range(total_frames):
@@ -680,6 +715,23 @@ async def _render_single_beat_core(
             frame = img.copy()
         writer.write(frame)
     writer.release()
+
+    # Transcode OpenCV mp4v to web-compatible H.264 (avc1) via ffmpeg
+    cmd = [
+        "ffmpeg", "-y", "-i", raw_video_path,
+        "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        out_video_path
+    ]
+    res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if res.returncode == 0 and os.path.exists(out_video_path):
+        if os.path.exists(raw_video_path):
+            try:
+                os.remove(raw_video_path)
+            except OSError:
+                pass
+    elif os.path.exists(raw_video_path):
+        os.replace(raw_video_path, out_video_path)
 
     return out_video_path
 
