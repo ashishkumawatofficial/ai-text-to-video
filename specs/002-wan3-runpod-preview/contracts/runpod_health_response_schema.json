@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RunPodHealthReportSchema",
+  "type": "object",
+  "required": ["url", "is_reachable", "latency_ms", "status_summary"],
+  "properties": {
+    "url": { "type": "string" },
+    "is_reachable": { "type": "boolean" },
+    "latency_ms": { "type": "number" },
+    "gpu_name": { "type": ["string", "null"] },
+    "vram_total_gb": { "type": ["number", "null"] },
+    "vram_free_gb": { "type": ["number", "null"] },
+    "comfyui_version": { "type": ["string", "null"] },
+    "available_checkpoints": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "has_wan3": { "type": "boolean" },
+    "has_wan2": { "type": "boolean" },
+    "has_ipadapter": { "type": "boolean" },
+    "status_summary": { "type": "string" }
+  }
+}

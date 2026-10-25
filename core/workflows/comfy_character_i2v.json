@@ -1,0 +1,82 @@
+{
+  "3": {
+    "class_type": "KSampler",
+    "inputs": {
+      "cfg": 6.5,
+      "denoise": 1,
+      "latent_image": ["5", 0],
+      "model": ["14", 0],
+      "negative": ["7", 0],
+      "positive": ["6", 0],
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "seed": 42,
+      "steps": 25
+    }
+  },
+  "5": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+      "batch_size": 1,
+      "height": 1280,
+      "width": 720
+    }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["14", 1],
+      "text": "cinematic character acting, expressive motion, high quality"
+    }
+  },
+  "7": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["14", 1],
+      "text": "blurry, low quality, distorted anatomy, jitter, artifacts"
+    }
+  },
+  "10": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "character_ref.png"
+    }
+  },
+  "14": {
+    "class_type": "IPAdapterApply",
+    "inputs": {
+      "image": ["10", 0],
+      "ipadapter": ["15", 0],
+      "model": ["16", 0],
+      "weight": 0.8
+    }
+  },
+  "15": {
+    "class_type": "IPAdapterModelLoader",
+    "inputs": {
+      "ipadapter_file": "ip-adapter-plus_sdxl_vit-h.safetensors"
+    }
+  },
+  "16": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "wan2.1_i2v_14b.safetensors"
+    }
+  },
+  "20": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["3", 0],
+      "vae": ["16", 2]
+    }
+  },
+  "25": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "crf": 19,
+      "format": "video/h264-mp4",
+      "images": ["20", 0],
+      "pix_fmt": "yuv420p"
+    }
+  }
+}

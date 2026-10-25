@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "StoryboardSessionSchema",
+  "description": "Validated schema contract for conversational storyboard review sessions.",
+  "type": "object",
+  "required": [
+    "session_id",
+    "created_at",
+    "updated_at",
+    "initial_prompt",
+    "approval_status",
+    "plan",
+    "history"
+  ],
+  "properties": {
+    "session_id": { "type": "string" },
+    "created_at": { "type": "string" },
+    "updated_at": { "type": "string" },
+    "initial_prompt": { "type": "string" },
+    "approval_status": {
+      "type": "string",
+      "enum": ["pending_review", "modifications_requested", "approved", "rejected"]
+    },
+    "reference_assets": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["tag", "file_path", "role"],
+        "properties": {
+          "tag": { "type": "string" },
+          "file_path": { "type": "string" },
+          "role": { "type": "string", "enum": ["character", "environment", "start_frame", "end_frame"] }
+        }
+      }
+    },
+    "plan": { "$ref": "director_master_plan_schema.json" },
+    "history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["turn_index", "user_message", "modified_beats", "summary_of_changes", "timestamp"],
+        "properties": {
+          "turn_index": { "type": "integer" },
+          "user_message": { "type": "string" },
+          "modified_beats": {
+            "type": "array",
+            "items": { "type": "integer" }
+          },
+          "summary_of_changes": { "type": "string" },
+          "timestamp": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RunPodServerlessAPIContract",
+  "description": "JSON schema for RunPod Serverless ComfyUI execution, status polling, and cancellation",
+  "definitions": {
+    "RunRequest": {
+      "type": "object",
+      "required": ["input"],
+      "properties": {
+        "input": {
+          "type": "object",
+          "required": ["workflow"],
+          "properties": {
+            "workflow": {
+              "type": "object",
+              "description": "Standard ComfyUI prompt dictionary with numbered node IDs"
+            },
+            "images": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "image": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "RunResponse": {
+      "type": "object",
+      "required": ["id", "status"],
+      "properties": {
+        "id": { "type": "string", "description": "Unique task identifier" },
+        "status": {
+          "type": "string",
+          "enum": ["IN_QUEUE", "IN_PROGRESS", "COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"]
+        }
+      }
+    },
+    "StatusResponse": {
+      "type": "object",
+      "required": ["id", "status"],
+      "properties": {
+        "id": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["IN_QUEUE", "IN_PROGRESS", "COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"]
+        },
+        "executionTime": { "type": "number", "description": "Compute duration in milliseconds" },
+        "delayTime": { "type": "number", "description": "Queue wait time in milliseconds" },
+        "output": {
+          "type": ["object", "string"],
+          "description": "Returned video artifact structure or base64 blob"
+        },
+        "error": { "type": "string", "description": "Error details if status is FAILED" }
+      }
+    },
+    "CancelResponse": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "type": "string" },
+        "id": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DirectorMasterPlanSchema",
+  "description": "Validated schema contract for autonomous director master plans.",
+  "type": "object",
+  "required": [
+    "title",
+    "genre",
+    "target_aspect_ratio",
+    "total_duration_sec",
+    "voiceover_enabled",
+    "music_genre_and_mood",
+    "subtitles_enabled",
+    "scenes"
+  ],
+  "properties": {
+    "title": { "type": "string" },
+    "genre": {
+      "type": "string",
+      "enum": ["riddle", "cinematic_story", "action", "documentary"]
+    },
+    "target_aspect_ratio": { "type": "string", "default": "9:16" },
+    "total_duration_sec": { "type": "number", "minimum": 1.0 },
+    "voiceover_enabled": { "type": "boolean" },
+    "voice_persona": { "type": "string", "default": "en-US-ChristopherNeural" },
+    "voice_speed": { "type": "number", "default": 1.0, "minimum": 0.5, "maximum": 2.0 },
+    "music_genre_and_mood": { "type": "string" },
+    "music_base_volume": { "type": "number", "default": 0.35, "minimum": 0.0, "maximum": 1.0 },
+    "music_ducked_volume": { "type": "number", "default": 0.10, "minimum": 0.0, "maximum": 1.0 },
+    "subtitles_enabled": { "type": "boolean" },
+    "subtitle_preset": { "type": "string", "default": "bold_yellow_glow" },
+    "scenes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "beat_index",
+          "name",
+          "duration_sec",
+          "conditioning_mode",
+          "camera_movement",
+          "visual_prompt"
+        ],
+        "properties": {
+          "beat_index": { "type": "integer", "minimum": 1 },
+          "name": { "type": "string" },
+          "duration_sec": { "type": "number", "minimum": 0.5 },
+          "conditioning_mode": {
+            "type": "string",
+            "enum": [
+              "pure_t2v",
+              "start_frame_only",
+              "start_and_end_frame",
+              "chain_from_previous",
+              "hard_cut"
+            ]
+          },
+          "camera_movement": { "type": "string" },
+          "visual_prompt": { "type": "string" },
+          "keyframe_image_path": { "type": ["string", "null"] },
+          "start_frame_path": { "type": ["string", "null"] },
+          "end_frame_path": { "type": ["string", "null"] },
+          "character_references": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "environment_reference": { "type": ["string", "null"] },
+          "dialogue_text": { "type": ["string", "null"] },
+          "sound_effects": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["sfx_name", "offset_sec"],
+              "properties": {
+                "sfx_name": { "type": "string" },
+                "offset_sec": { "type": "number", "minimum": 0.0 },
+                "volume": { "type": "number", "default": 0.8, "minimum": 0.0, "maximum": 1.0 }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

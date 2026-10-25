@@ -1,0 +1,268 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Iterative Shot Chaining & Single-Beat Rendering API",
+    "version": "1.0.0",
+    "description": "API endpoints enabling step-by-step scene video diffusion, OpenCV terminal frame continuity extraction, selective unlinking, and master timeline compilation."
+  },
+  "paths": {
+    "/api/render/beat": {
+      "post": {
+        "summary": "Render a single narrative beat video clip",
+        "description": "Dispatches only the specified beat card to the chosen compute backend (serverless, pod, or local mock) without triggering other scenes.",
+        "operationId": "renderSingleBeat",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["session_id", "beat_index"],
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "ID of active studio session"
+                  },
+                  "beat_index": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "0-based index of the beat to render"
+                  },
+                  "backend": {
+                    "type": "string",
+                    "enum": ["serverless", "pod", "local"],
+                    "default": "serverless",
+                    "description": "Execution backend override"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Beat rendered successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["status", "beat_index", "output_video_path", "beat"],
+                  "properties": {
+                    "status": { "type": "string", "example": "completed" },
+                    "session_id": { "type": "string" },
+                    "beat_index": { "type": "integer" },
+                    "output_video_path": { "type": "string", "example": "/outputs/temp/scene_1_c8769d67.mp4" },
+                    "beat": { "$ref": "#/components/schemas/StoryboardCard" }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Session or beat index not found"
+          },
+          "500": {
+            "description": "Render failure with diagnostic details"
+          }
+        }
+      }
+    },
+    "/api/storyboard/chain-frame": {
+      "post": {
+        "summary": "Extract terminal frame from Shot K and bind to Shot K+1",
+        "description": "Uses OpenCV to extract Frame -1 of source_beat_index's rendered video and binds it as the START_FRAME anchor and preview plate of source_beat_index + 1.",
+        "operationId": "chainFrameToNextShot",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["session_id", "source_beat_index"],
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "ID of active studio session"
+                  },
+                  "source_beat_index": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "0-based index of completed source shot"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Frame successfully extracted and chained to next beat",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["status", "source_beat_index", "target_beat_index", "chained_frame_path", "target_card"],
+                  "properties": {
+                    "status": { "type": "string", "example": "chained" },
+                    "session_id": { "type": "string" },
+                    "source_beat_index": { "type": "integer" },
+                    "target_beat_index": { "type": "integer" },
+                    "chained_frame_path": { "type": "string", "example": "/outputs/temp/chain_c8769d67_shot_0_to_1.png" },
+                    "target_card": { "$ref": "#/components/schemas/StoryboardCard" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Source beat has no rendered video or source is the terminal shot"
+          },
+          "404": {
+            "description": "Session or beat not found"
+          }
+        }
+      }
+    },
+    "/api/storyboard/unlink-chain": {
+      "post": {
+        "summary": "Unlink chained frame and revert beat to independent keyframe",
+        "description": "Removes the START_FRAME continuity link from the specified beat and reverts its keyframe plate to the standalone generated prompt artwork.",
+        "operationId": "unlinkChainedFrame",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["session_id", "beat_index"],
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "beat_index": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Chain unlinked successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["status", "beat_index", "target_card"],
+                  "properties": {
+                    "status": { "type": "string", "example": "unlinked" },
+                    "beat_index": { "type": "integer" },
+                    "target_card": { "$ref": "#/components/schemas/StoryboardCard" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/render/compile": {
+      "post": {
+        "summary": "Compile master video from pre-rendered scene clips",
+        "description": "Assembles pre-rendered clips into the master Remotion timeline with synthesized multi-character audio, background music, SFX, and kinetic subtitles in < 15 seconds.",
+        "operationId": "compileMasterVideo",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["session_id"],
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "allow_partial": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "If true, compiles available rendered clips even if some beats remain pending"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Master video assembled and ready for playback",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["status", "session_id", "master_video_path"],
+                  "properties": {
+                    "status": { "type": "string", "example": "completed" },
+                    "session_id": { "type": "string" },
+                    "master_video_path": { "type": "string", "example": "/outputs/temp/c8769d67_master.mp4" },
+                    "duration_seconds": { "type": "number", "example": 14.2 }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No clips rendered or unrendered beats exist when allow_partial is false"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "StoryboardCard": {
+        "type": "object",
+        "required": [
+          "beat_id",
+          "beat_index",
+          "visual_prompt",
+          "speaker",
+          "dialogue_text",
+          "voice_actor",
+          "camera_motion",
+          "duration_seconds",
+          "duration_frames",
+          "render_status"
+        ],
+        "properties": {
+          "beat_id": { "type": "string" },
+          "beat_index": { "type": "integer" },
+          "visual_prompt": { "type": "string" },
+          "keyframe_path": { "type": "string", "nullable": true },
+          "speaker": { "type": "string" },
+          "dialogue_text": { "type": "string" },
+          "voice_actor": { "type": "string" },
+          "camera_motion": { "type": "string" },
+          "duration_seconds": { "type": "number" },
+          "duration_frames": { "type": "integer" },
+          "render_status": {
+            "type": "string",
+            "enum": ["pending", "in_queue", "rendering", "completed", "failed"]
+          },
+          "output_video_path": { "type": "string", "nullable": true },
+          "edited_by_ai": { "type": "boolean", "default": false },
+          "is_custom_image": { "type": "boolean", "default": false },
+          "is_chained": { "type": "boolean", "default": false },
+          "chained_from_beat": { "type": "integer", "nullable": true },
+          "chain_out_of_sync": { "type": "boolean", "default": false },
+          "error_message": { "type": "string", "nullable": true }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ComfyUIApiContract",
+  "description": "Payload sent to RunPod ComfyUI API for Image-to-Video and Frame-Chained video inference",
+  "type": "object",
+  "required": ["client_id", "prompt_workflow"],
+  "properties": {
+    "client_id": { "type": "string" },
+    "workflow_type": {
+      "type": "string",
+      "enum": ["wan2_1_i2v", "cogvideox_i2v", "dual_frame_interpolation", "character_lora_t2v"]
+    },
+    "params": {
+      "type": "object",
+      "required": ["motion_prompt", "duration_frames"],
+      "properties": {
+        "motion_prompt": { "type": "string" },
+        "negative_prompt": { "type": "string", "default": "blurry, jitter, low quality, artifacts, distorted anatomy" },
+        "start_image_path": { "type": "string" },
+        "end_image_path": { "type": "string" },
+        "character_reference_image": { "type": "string" },
+        "ip_adapter_weight": { "type": "number", "default": 0.75 },
+        "duration_frames": { "type": "integer", "default": 81 },
+        "fps": { "type": "integer", "default": 16 },
+        "width": { "type": "integer", "default": 720 },
+        "height": { "type": "integer", "default": 1280 },
+        "seed": { "type": "integer" },
+        "cfg_scale": { "type": "number", "default": 6.0 },
+        "steps": { "type": "integer", "default": 30 }
+      }
+    },
+    "prompt_workflow": {
+      "type": "object",
+      "description": "The complete ComfyUI node graph JSON with parameter overrides applied"
+    }
+  }
+}

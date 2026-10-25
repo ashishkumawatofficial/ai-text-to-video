@@ -1,0 +1,61 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Wan3ComfyUIWorkflowContract",
+  "type": "object",
+  "required": ["prompt", "model_checkpoint", "duration_frames"],
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Visual motion prompt describing scene dynamics and action"
+    },
+    "negative_prompt": {
+      "type": "string",
+      "default": "blurry, low quality, distorted anatomy, jitter, artifacts"
+    },
+    "model_checkpoint": {
+      "type": "string",
+      "default": "wan3.0_i2v_14b_fp8.safetensors"
+    },
+    "width": {
+      "type": "integer",
+      "default": 720,
+      "minimum": 480,
+      "maximum": 1920
+    },
+    "height": {
+      "type": "integer",
+      "default": 1280,
+      "minimum": 480,
+      "maximum": 1920
+    },
+    "duration_frames": {
+      "type": "integer",
+      "default": 150,
+      "minimum": 30,
+      "maximum": 900
+    },
+    "steps": {
+      "type": "integer",
+      "default": 25,
+      "minimum": 10,
+      "maximum": 50
+    },
+    "cfg": {
+      "type": "number",
+      "default": 6.5,
+      "minimum": 1.0,
+      "maximum": 15.0
+    },
+    "seed": {
+      "type": "integer",
+      "default": 42
+    },
+    "reference_images": {
+      "type": "array",
+      "items": { "type": "string" },
+      "maxItems": 10,
+      "description": "Up to 10 image paths for multi-asset Omni-Reference conditioning"
+    }
+  }
+}

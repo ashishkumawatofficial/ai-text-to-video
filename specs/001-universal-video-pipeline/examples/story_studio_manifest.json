@@ -1,0 +1,40 @@
+{
+  "title": "The Cyber Detective",
+  "genre": "cinematic_story",
+  "ingestion_mode": "directed_studio",
+  "fps": 30,
+  "aspect_ratio": "9:16",
+  "character_profiles": [
+    {
+      "character_id": "detective_ren",
+      "name": "Detective Ren",
+      "reference_images": ["assets/reference.jpg"],
+      "identity_prompt": "cyberpunk detective in trenchcoat, short dark hair, cybernetic blue eye",
+      "ip_adapter_weight": 0.8
+    }
+  ],
+  "scenes": [
+    {
+      "beat_index": 1,
+      "name": "The Crime Scene",
+      "duration_sec": 3.5,
+      "visual_strategy": "FLAT_RATE_DIFFUSION",
+      "reference_image": "assets/detective_scene1.jpg",
+      "dialogue_text": "In the neon rain of sector four, every shadow hides a motive.",
+      "sound_effects": [
+        { "sfx_name": "whoosh", "offset_sec": 0.2, "volume": 0.7 }
+      ]
+    },
+    {
+      "beat_index": 2,
+      "name": "The Discovery",
+      "duration_sec": 4.0,
+      "visual_strategy": "FLAT_RATE_DIFFUSION",
+      "reference_image": "assets/detective_scene2.jpg",
+      "dialogue_text": "Ren found the lost data chip. The case was finally breaking wide open.",
+      "sound_effects": [
+        { "sfx_name": "solved_chime", "offset_sec": 1.5, "volume": 0.9 }
+      ]
+    }
+  ]
+}

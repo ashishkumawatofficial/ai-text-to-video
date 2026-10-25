@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WanVideoWorkflowConfig",
+  "description": "Configuration contract for populating Wan 2.1 video diffusion workflows in ComfyUI.",
+  "type": "object",
+  "required": ["prompt", "width", "height", "duration_frames"],
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "description": "4-part kinetic motion prompt describing subject action, interaction, physics, and camera path."
+    },
+    "negative_prompt": {
+      "type": "string",
+      "default": "blurry, low quality, distorted anatomy, jitter, artifacts, static, strobe, slideshow"
+    },
+    "width": {
+      "type": "integer",
+      "enum": [832, 480, 640]
+    },
+    "height": {
+      "type": "integer",
+      "enum": [480, 832, 640]
+    },
+    "duration_frames": {
+      "type": "integer",
+      "description": "Must satisfy 4k + 1 rule (17, 33, 49, 65, 81 frames).",
+      "enum": [17, 33, 49, 65, 81]
+    },
+    "reference_image_path": {
+      "type": "string",
+      "description": "Local path or URI to approved storyboard keyframe image for Image-to-Video conditioning."
+    },
+    "steps": {
+      "type": "integer",
+      "minimum": 8,
+      "maximum": 30,
+      "default": 14
+    },
+    "cfg": {
+      "type": "number",
+      "default": 6.0
+    },
+    "seed": {
+      "type": "integer",
+      "default": 42
+    }
+  }
+}

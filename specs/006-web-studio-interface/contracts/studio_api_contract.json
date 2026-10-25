@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WebStudioAPIContract",
+  "description": "REST and SSE API Contract for the AI Video Web Studio Backend",
+  "endpoints": {
+    "GET /api/health": {
+      "summary": "Check backend health, Gemini status, and RunPod Serverless connection",
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "status": { "type": "string", "enum": ["HEALTHY", "DEGRADED", "OFFLINE"] },
+            "gemini_active": { "type": "boolean" },
+            "serverless_endpoint_id": { "type": "string" },
+            "serverless_healthy": { "type": "boolean" },
+            "workers_idle": { "type": "integer" }
+          },
+          "required": ["status", "gemini_active", "serverless_healthy"]
+        }
+      }
+    },
+    "POST /api/storyboard/generate": {
+      "summary": "Generate visual storyboard beat cards and keyframe image previews from a concept prompt",
+      "requestBody": {
+        "type": "object",
+        "properties": {
+          "prompt": { "type": "string" },
+          "aspect_ratio": { "type": "string", "enum": ["16:9", "9:16", "1:1"], "default": "16:9" },
+          "genre": { "type": "string", "default": "cinematic" }
+        },
+        "required": ["prompt"]
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "session_id": { "type": "string" },
+            "aspect_ratio": { "type": "string" },
+            "beats": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "beat_index": { "type": "integer" },
+                  "visual_prompt": { "type": "string" },
+                  "keyframe_url": { "type": "string" },
+                  "dialogue_text": { "type": "string" },
+                  "camera_motion": { "type": "string" },
+                  "duration_seconds": { "type": "number" },
+                  "render_status": { "type": "string" }
+                },
+                "required": ["beat_index", "visual_prompt", "dialogue_text"]
+              }
+            }
+          },
+          "required": ["session_id", "beats"]
+        }
+      }
+    },
+    "POST /api/storyboard/reroll": {
+      "summary": "Surgically regenerate a single narrative beat without invalidating other scenes",
+      "requestBody": {
+        "type": "object",
+        "properties": {
+          "session_id": { "type": "string" },
+          "beat_index": { "type": "integer" },
+          "prompt_override": { "type": "string" }
+        },
+        "required": ["session_id", "beat_index"]
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "beat_index": { "type": "integer" },
+            "visual_prompt": { "type": "string" },
+            "keyframe_url": { "type": "string" }
+          },
+          "required": ["beat_index", "visual_prompt"]
+        }
+      }
+    },
+    "POST /api/director/chat": {
+      "summary": "Chat with Gemini AI Co-Director to request story adjustments and apply delta updates to canvas cards",
+      "requestBody": {
+        "type": "object",
+        "properties": {
+          "session_id": { "type": "string" },
+          "message": { "type": "string" }
+        },
+        "required": ["session_id", "message"]
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "reply": { "type": "string" },
+            "applied_delta": {
+              "type": "object",
+              "properties": {
+                "action": { "type": "string", "enum": ["UPDATE_BEAT", "REROLL_KEYFRAME", "UPDATE_SCRIPT", "CHANGE_ASPECT_RATIO"] },
+                "target_beat": { "type": "integer" },
+                "field": { "type": "string" },
+                "new_value": { "type": "string" }
+              }
+            },
+            "updated_beats": { "type": "array" }
+          },
+          "required": ["reply"]
+        }
+      }
+    },
+    "POST /api/render/start": {
+      "summary": "Begin multi-beat video diffusion rendering across configured backend workers",
+      "requestBody": {
+        "type": "object",
+        "properties": {
+          "session_id": { "type": "string" },
+          "backend": { "type": "string", "enum": ["auto", "serverless", "pod", "local"], "default": "serverless" }
+        },
+        "required": ["session_id"]
+      },
+      "responses": {
+        "202": {
+          "type": "object",
+          "properties": {
+            "status": { "type": "string", "enum": ["DISPATCHED", "IN_PROGRESS"] },
+            "worker_count": { "type": "integer" }
+          },
+          "required": ["status", "worker_count"]
+        }
+      }
+    },
+    "POST /api/render/cancel": {
+      "summary": "Immediately terminate all in-flight cloud serverless rendering jobs to prevent unwanted billing",
+      "requestBody": {
+        "type": "object",
+        "properties": {
+          "session_id": { "type": "string" }
+        },
+        "required": ["session_id"]
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "cancelled": { "type": "boolean" },
+            "jobs_terminated": { "type": "integer" }
+          },
+          "required": ["cancelled", "jobs_terminated"]
+        }
+      }
+    },
+    "GET /api/events": {
+      "summary": "Server-Sent Events (SSE) streaming real-time worker states, progress percentages, and USD billing accumulation",
+      "produces": ["text/event-stream"],
+      "eventPayload": {
+        "type": "object",
+        "properties": {
+          "active_workers": { "type": "integer" },
+          "elapsed_seconds": { "type": "number" },
+          "cost_usd": { "type": "number" },
+          "worker_tiles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "beat_index": { "type": "integer" },
+                "status": { "type": "string" },
+                "progress_percent": { "type": "integer" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

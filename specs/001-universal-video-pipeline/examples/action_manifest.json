@@ -1,0 +1,35 @@
+{
+  "title": "Neon Samurai Combat",
+  "genre": "action",
+  "ingestion_mode": "directed_studio",
+  "fps": 30,
+  "aspect_ratio": "9:16",
+  "scenes": [
+    {
+      "beat_index": 1,
+      "name": "The Stance",
+      "duration_sec": 3.0,
+      "visual_strategy": "FLAT_RATE_DIFFUSION",
+      "reference_image": "assets/reference.jpg",
+      "dialogue_text": "In the neon rain, silence is the only armor.",
+      "sound_effects": [
+        { "sfx_name": "whoosh", "offset_sec": 0.2, "volume": 0.8 }
+      ]
+    },
+    {
+      "beat_index": 2,
+      "name": "The Strike",
+      "duration_sec": 3.5,
+      "visual_strategy": "FLAT_RATE_DIFFUSION",
+      "continuity": {
+        "chain_from_previous": true,
+        "motion_continuation_prompt": "samurai slashes blade forward with glowing light trail"
+      },
+      "dialogue_text": "One decisive cut shatters the silence forever.",
+      "sound_effects": [
+        { "sfx_name": "whoosh", "offset_sec": 0.3, "volume": 1.0 },
+        { "sfx_name": "solved_chime", "offset_sec": 1.5, "volume": 0.9 }
+      ]
+    }
+  ]
+}

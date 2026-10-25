@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RemotionRenderProps",
+  "description": "Payload passed to Remotion Root composition for master video compilation",
+  "type": "object",
+  "required": ["genre", "totalDurationFrames", "fps", "width", "height", "scenes", "audio"],
+  "properties": {
+    "genre": { "type": "string", "enum": ["riddle", "cinematic_story", "action"] },
+    "totalDurationFrames": { "type": "integer", "minimum": 30 },
+    "fps": { "type": "integer", "default": 30 },
+    "width": { "type": "integer", "default": 1080 },
+    "height": { "type": "integer", "default": 1920 },
+    "scenes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "startFrame", "durationInFrames", "type"],
+        "properties": {
+          "id": { "type": "string" },
+          "startFrame": { "type": "integer" },
+          "durationInFrames": { "type": "integer" },
+          "type": { "type": "string", "enum": ["video_clip", "static_plate", "sprite_sequence", "countdown_timer"] },
+          "mediaSrc": { "type": "string" },
+          "spriteOverlays": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["src", "keyframes"],
+              "properties": {
+                "src": { "type": "string" },
+                "keyframes": { "type": "object" }
+              }
+            }
+          },
+          "timerConfig": {
+            "type": "object",
+            "properties": {
+              "countdownSeconds": { "type": "integer", "default": 7 },
+              "showRadialDial": { "type": "boolean", "default": true }
+            }
+          }
+        }
+      }
+    },
+    "subtitles": {
+      "type": "object",
+      "required": ["words"],
+      "properties": {
+        "stylePreset": { "type": "string", "default": "bold_yellow_glow" },
+        "words": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["word", "startMs", "endMs"],
+            "properties": {
+              "word": { "type": "string" },
+              "startMs": { "type": "integer" },
+              "endMs": { "type": "integer" }
+            }
+          }
+        }
+      }
+    },
+    "audio": {
+      "type": "object",
+      "required": ["voiceoverSrc"],
+      "properties": {
+        "voiceoverSrc": { "type": "string" },
+        "musicSrc": { "type": "string" },
+        "musicBaseVolume": { "type": "number", "default": 0.35 },
+        "musicDuckedVolume": { "type": "number", "default": 0.10 },
+        "sfxCues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["src", "startFrame"],
+            "properties": {
+              "src": { "type": "string" },
+              "startFrame": { "type": "integer" },
+              "volume": { "type": "number", "default": 1.0 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "StoryWriterResultContract",
+  "type": "object",
+  "required": ["plan", "model_used", "tier_level", "latency_ms", "fallback_occurred"],
+  "properties": {
+    "plan": {
+      "$ref": "file:///Users/ashishkumavat/Projects/ai-text-to-video/specs/003-interactive-storyboard-approval/contracts/director_master_plan_schema.json"
+    },
+    "model_used": {
+      "type": "string",
+      "description": "Identifier of the model that successfully authored the plan (e.g. gemini-2.5-flash or offline_heuristic)"
+    },
+    "tier_level": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4,
+      "description": "1: Frontier, 2: Stable Fallback, 3: Legacy, 4: Offline Local"
+    },
+    "latency_ms": {
+      "type": "number",
+      "minimum": 0.0,
+      "description": "Execution time in milliseconds"
+    },
+    "fallback_occurred": {
+      "type": "boolean",
+      "description": "True if an initial model failed and a fallback tier was engaged"
+    },
+    "error_trace": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Logged errors from higher tiers if fallback occurred"
+    }
+  }
+}

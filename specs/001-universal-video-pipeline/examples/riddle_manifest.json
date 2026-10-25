@@ -1,0 +1,48 @@
+{
+  "title": "The Six Glasses Riddle",
+  "genre": "riddle",
+  "ingestion_mode": "directed_studio",
+  "fps": 30,
+  "aspect_ratio": "9:16",
+  "scenes": [
+    {
+      "beat_index": 1,
+      "name": "Riddle Question Hook",
+      "duration_sec": 4.0,
+      "visual_strategy": "PROGRAMMATIC_HYBRID",
+      "reference_image": "assets/processed/reference_1080.png",
+      "dialogue_text": "There are six glasses in a row. The first three are full, and the last three are empty.",
+      "sound_effects": [
+        { "sfx_name": "whoosh", "offset_sec": 0.1, "volume": 0.8 }
+      ]
+    },
+    {
+      "beat_index": 2,
+      "name": "Thinking Pause",
+      "duration_sec": 7.0,
+      "visual_strategy": "PROGRAMMATIC_HYBRID",
+      "reference_image": "assets/processed/reference_1080.png",
+      "dialogue_text": "By moving only one glass, can you make them alternate between full and empty? Pause now to think!",
+      "sound_effects": [
+        { "sfx_name": "clock_tick", "offset_sec": 1.0, "volume": 1.0 },
+        { "sfx_name": "clock_tick", "offset_sec": 2.0, "volume": 1.0 },
+        { "sfx_name": "clock_tick", "offset_sec": 3.0, "volume": 1.0 },
+        { "sfx_name": "clock_tick", "offset_sec": 4.0, "volume": 1.0 },
+        { "sfx_name": "clock_tick", "offset_sec": 5.0, "volume": 1.0 },
+        { "sfx_name": "clock_tick", "offset_sec": 6.0, "volume": 1.0 }
+      ]
+    },
+    {
+      "beat_index": 3,
+      "name": "Solution Reveal",
+      "duration_sec": 5.0,
+      "visual_strategy": "PROGRAMMATIC_HYBRID",
+      "reference_image": "assets/processed/reference_solved.png",
+      "dialogue_text": "Pick up glass number two, pour all the water into glass number five, and put it back. Simple!",
+      "sound_effects": [
+        { "sfx_name": "water_pour", "offset_sec": 0.2, "volume": 0.9 },
+        { "sfx_name": "solved_chime", "offset_sec": 2.5, "volume": 1.0 }
+      ]
+    }
+  ]
+}
