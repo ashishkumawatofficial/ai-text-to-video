@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Video, Cpu, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Video, Cpu, Sparkles, ChevronLeft } from 'lucide-react';
 import {
   StudioSession,
   TelemetryState,
@@ -16,7 +16,11 @@ import {
   chainFrame,
   unlinkChain,
   compileMaster,
+  getProject,
+  updateProject,
+  setActiveTake,
 } from './services/api';
+import { ProjectDashboard } from './components/ProjectDashboard';
 import { DirectorSidebar } from './components/DirectorSidebar';
 import { StoryboardCanvas } from './components/StoryboardCanvas';
 import { RemotionPlayerPane } from './components/RemotionPlayerPane';
@@ -24,11 +28,13 @@ import { TelemetryGrid } from './components/TelemetryGrid';
 import './styles/studio.css';
 
 export function App() {
+  const [currentView, setCurrentView] = useState<'dashboard' | 'studio'>('dashboard');
   const [prompt, setPrompt] = useState('A brave astronaut discovering an ancient crystal on Mars under a red dust storm');
   const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16' | '1:1'>('16:9');
   const [directingMode, setDirectingMode] = useState<'auto' | 'pro'>('pro');
   const [backend, setBackend] = useState<'serverless' | 'pod' | 'local'>('serverless');
   const [voicePersona, setVoicePersona] = useState<string>('auto');
+  const [projectTitle, setProjectTitle] = useState('Untitled Project');
 
   const [session, setSession] = useState<StudioSession | null>(null);
   const [telemetry, setTelemetry] = useState<TelemetryState | undefined>(undefined);
@@ -47,8 +53,58 @@ export function App() {
       setTelemetry(newTelemetry);
     });
 
+    // Check for ?project= query parameter for direct deep-linking
+    const searchParams = new URLSearchParams(window.location.search);
+    const initialProjectId = searchParams.get('project');
+    if (initialProjectId) {
+      handleOpenProject(initialProjectId);
+    }
+
     return () => unsubscribe();
   }, []);
+
+  // Handle Opening a Project (from Dashboard or URL)
+  const handleOpenProject = async (projectId: string) => {
+    try {
+      const proj = await getProject(projectId);
+      setSession(proj);
+      setProjectTitle(proj.title || proj.concept_prompt.slice(0, 36) || 'Untitled Video');
+      if (proj.concept_prompt) setPrompt(proj.concept_prompt);
+      if (proj.aspect_ratio) setAspectRatio(proj.aspect_ratio);
+      if (proj.directing_mode) setDirectingMode(proj.directing_mode as any);
+      if (proj.backend_strategy) setBackend(proj.backend_strategy as any);
+
+      // Synchronize browser URL without page reload
+      const url = new URL(window.location.href);
+      url.searchParams.set('project', projectId);
+      window.history.pushState({}, '', url.toString());
+
+      setCurrentView('studio');
+    } catch (err: any) {
+      console.error('Failed to load project:', err);
+      alert(`Could not load project: ${err.message}`);
+      setCurrentView('dashboard');
+    }
+  };
+
+  // Return from Studio to Dashboard
+  const handleBackToDashboard = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('project');
+    window.history.pushState({}, '', url.pathname);
+    setCurrentView('dashboard');
+  };
+
+  // In-header Project Title Rename
+  const handleTitleBlur = async () => {
+    if (!session || !projectTitle.trim() || projectTitle === session.title) return;
+    try {
+      await updateProject(session.session_id, projectTitle.trim());
+      setSession((prev) => (prev ? { ...prev, title: projectTitle.trim() } : prev));
+    } catch (err) {
+      console.error('Failed to update title:', err);
+    }
+  };
 
   // Storyboard Planning Generator
   const handleGenerateStoryboard = async () => {
@@ -63,6 +119,12 @@ export function App() {
         voicePersona
       );
       setSession(newSession);
+      setProjectTitle(newSession.title || prompt.slice(0, 36) || 'Untitled Video');
+      
+      // Update URL with session ID
+      const url = new URL(window.location.href);
+      url.searchParams.set('project', newSession.session_id);
+      window.history.pushState({}, '', url.toString());
     } catch (err) {
       console.error('Storyboard generation error:', err);
       alert('Failed to generate storyboard plan. Ensure backend is running.');
@@ -72,10 +134,10 @@ export function App() {
   };
 
   // Beat Keyframe Reroll
-  const handleRerollBeat = async (beatIndex: number, promptOverride?: string) => {
+  const handleRerollBeat = async (beatIndex: number, promptOverride?: string, promptType: 'image' | 'motion' = 'image') => {
     if (!session) return;
     try {
-      const updatedCard = await rerollBeat(session.session_id, beatIndex, promptOverride);
+      const updatedCard = await rerollBeat(session.session_id, beatIndex, promptOverride, promptType);
       setSession((prev) => {
         if (!prev) return prev;
         const newBeats = [...prev.beats];
@@ -122,6 +184,8 @@ export function App() {
         voicePersona: updates.voice_actor,
         dialogueText: updates.dialogue_text,
         visualPrompt: updates.visual_prompt,
+        imagePrompt: updates.image_prompt,
+        motionPrompt: updates.motion_prompt,
         cameraMotion: updates.camera_motion,
       });
       setSession((prev) => {
@@ -138,7 +202,7 @@ export function App() {
     }
   };
 
-  // Single-Beat Video Render
+  // Single-Beat Video Render (Multi-Take Recording)
   const handleRenderBeat = async (beatIndex: number) => {
     if (!session) return;
     try {
@@ -180,6 +244,30 @@ export function App() {
         }
         return { ...prev, beats: newBeats };
       });
+    }
+  };
+
+  // Multi-Take Selection Switcher
+  const handleSelectTake = async (beatIndex: number, takeId: string) => {
+    if (!session) return;
+    try {
+      const res = await setActiveTake(session.session_id, beatIndex, takeId);
+      setSession((prev) => {
+        if (!prev) return prev;
+        const newBeats = [...prev.beats];
+        const targetIdx = newBeats.findIndex((b) => b.beat_index === beatIndex);
+        if (targetIdx !== -1) {
+          newBeats[targetIdx] = {
+            ...newBeats[targetIdx],
+            active_take_id: res.active_take_id,
+            output_video_path: res.output_video_path,
+          };
+        }
+        return { ...prev, beats: newBeats };
+      });
+    } catch (err: any) {
+      console.error('Take switch error:', err);
+      alert(`Failed to switch take: ${err.message}`);
     }
   };
 
@@ -299,20 +387,52 @@ export function App() {
     }
   };
 
+  // 1. If currently on Dashboard view, render Project Dashboard
+  if (currentView === 'dashboard') {
+    return (
+      <ProjectDashboard
+        onOpenProject={handleOpenProject}
+        healthStatus={healthStatus}
+      />
+    );
+  }
+
+  // 2. Otherwise render Studio Editing Workspace
   const completedBeatsCount = session ? session.beats.filter((b) => b.render_status === 'completed').length : 0;
 
   return (
     <div className="studio-container">
       {/* Studio Header */}
       <header className="studio-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <button
+            className="btn-back-projects"
+            onClick={handleBackToDashboard}
+            title="Return to Projects Dashboard"
+          >
+            <ChevronLeft size={16} />
+            <span>Projects</span>
+          </button>
+
+          <span style={{ color: 'var(--border-subtle)' }}>|</span>
+
           <div className="studio-logo-badge">
             <Video size={18} />
           </div>
-          <div>
-            <h1 className="studio-title">AI Video Production Studio</h1>
-            <span className="studio-subtitle">Next-Gen Autonomous Agentic Video Filmmaking</span>
-          </div>
+
+          <input
+            type="text"
+            className="editable-title-input"
+            value={projectTitle}
+            onChange={(e) => setProjectTitle(e.target.value)}
+            onBlur={handleTitleBlur}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+            title="Click to rename project"
+          />
         </div>
 
         {/* Global Cluster Status Indicators */}
@@ -368,6 +488,8 @@ export function App() {
           beats={session?.beats || []}
           aspectRatio={aspectRatio}
           conceptPrompt={session?.concept_prompt || prompt}
+          projectId={session?.session_id}
+          onSelectTake={handleSelectTake}
           onRerollBeat={handleRerollBeat}
           onUploadBeatImage={handleUploadBeatImage}
           onUpdateCard={handleUpdateBeat}

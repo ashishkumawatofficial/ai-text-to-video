@@ -157,17 +157,18 @@ Default Voice Persona: {brief.voice_persona or "en-US-ChristopherNeural"}
 
 Rules:
 1. Divide the story into 2 to 6 compelling scene beats (total duration between 10s and 60s, each scene 3s to 8s).
-2. MULTI-CHARACTER DIALOGUE ATTRIBUTION:
-   - Identify distinct speaking characters in the story.
-   - For each scene beat with speech, attribute dialogue to a specific character via "speaker" (e.g. 'Cow #1', 'Suit Cow', 'Narrator').
-   - Assign each character a distinct "voice_persona" matching their personality/archetype (options: 'cartoon_animal', 'male_casual', 'male_deep', 'female_sarcastic', 'female_warm', 'deep_villain', 'kid', or Edge-TTS voices like 'en-US-GuyNeural', 'en-US-ChristopherNeural', 'en-US-AriaNeural', 'en-US-JennyNeural').
-   - If a scene is non-verbal, set dialogue_text to null and speaker to "Narrator".
-3. 4-PART KINETIC MOTION PROMPTING:
-   In each visual_prompt, describe dynamic temporal motion rather than static images, structured into 4 explicit parts:
-   a) Primary Subject Action: Exact physical movement occurring in seconds 0-4 (e.g. 'lifts glass of tea to take a sip, blinking and smiling')
-   b) Secondary Interaction: Reactions from other characters or environment (e.g. 'the other cows chuckle and nod')
-   c) Micro-environmental Physics: Fluid ambient motion (e.g. 'wisps of hot steam billow into golden morning sunlight')
-   d) Camera Movement: Kinetic directive matching camera_movement (e.g. 'cinematic slow push in, smooth eye-level tracking'). Prepend framing keywords: "{framing_hint}".
+2. MULTI-CHARACTER DIALOGUE ATTRIBUTION (NARRATION IS SITUATIONAL & OPTIONAL):
+   - Identify distinct speaking characters in the story (e.g. 'Cow #1', 'Corporate Cow', 'Neon Samurai').
+   - For scenes with dialogue, attribute speech to the actual character speaking.
+   - NARRATION IS OPTIONAL: Do NOT automatically generate a Narrator. Only use a 'Narrator' speaker if the story format genuinely requires an overarching voiceover (e.g. documentary, fable, intro hook, or if the user explicitly requested a narrator).
+   - If a scene is a dialogue between characters, DO NOT include a Narrator. Let the characters converse directly.
+   - If a scene is non-verbal (purely visual action, silent cinematic moment), set dialogue_text to null and speaker to null. Do NOT assign a fake Narrator to silent visual scenes.
+   - Assign each speaking character a distinct "voice_persona" matching their personality/archetype (options: 'cartoon_animal', 'male_casual', 'male_deep', 'female_sarcastic', 'female_warm', 'deep_villain', 'kid', or Edge-TTS voices like 'en-US-GuyNeural', 'en-US-ChristopherNeural', 'en-US-AriaNeural', 'en-US-JennyNeural').
+3. DUAL-PROMPT ARCHITECTURE (IMAGE PROMPT vs. MOTION PROMPT):
+   In each scene beat, author two specialized prompts in addition to visual_prompt:
+   a) image_prompt: Specifically optimized for static keyframe image synthesis (FLUX.1 / Imagen). Describe visual aesthetics, character appearance, detailed clothing/textures, background setting, architectural environment, lighting (e.g. volumetric sunlight, neon reflections), and cinematic framing (e.g. 16:9 panoramic landscape framing). Focus on a pristine static composition—avoid temporal action verbs.
+   b) motion_prompt: Specifically optimized for video diffusion models (Wan 2.1 Image-to-Video). Structure using 4-PART KINETIC MOTION PROMPTING: (1) Primary Subject Action, (2) Secondary Interaction, (3) Micro-environmental Physics, and (4) Camera Movement & kinetics.
+   c) visual_prompt: Unified prompt combining both the visual scene description and 4-part kinetic motion.
 4. Camera movement must be one of: zoom_in, zoom_out, pan_left, pan_right, tilt_up, tilt_down, slow_push_in, static.
 5. Include contextual background music (genre, mood, tempo) and audio cues (sound effects with offset_sec and duration_sec).
 6. Output MUST be valid JSON conforming to DirectorMasterPlan:
@@ -175,14 +176,14 @@ Rules:
    - genre: MUST be one of: "cinematic_story", "riddle", "action"
    - aspect_ratio: "{ratio_str}"
    - total_duration_sec: float
-   - scenes: list of objects with beat_index (int), name (string), duration_sec (float), camera_movement (string), visual_prompt (string), speaker (string), voice_persona (string or null), dialogue_text (string or null).
+   - scenes: list of objects with beat_index (int), name (string), duration_sec (float), camera_movement (string), image_prompt (string), motion_prompt (string), visual_prompt (string), speaker (string or null), voice_persona (string or null), dialogue_text (string or null).
 7. MULTILINGUAL & CROSS-LINGUAL CAPABILITY:
    - If the user specifies or implies dialogue in another language (e.g. Hindi, Japanese, Spanish, French, etc.), write dialogue_text in that language or dialect.
-   - ALWAYS author visual_prompt in vivid cinematic English to ensure peak diffusion generation quality in Wan 2.1 video models.
+   - ALWAYS author visual_prompt, image_prompt, and motion_prompt in vivid cinematic English to ensure peak diffusion generation quality in Wan 2.1 video models.
 8. STRICT VISUAL CONTINUITY & CHARACTER/ENVIRONMENT ANCHORING:
-   - UNIFIED ART STYLE: Establish a single visual aesthetic across all scene beats (e.g. '3D Pixar-inspired cartoon style' or 'photorealistic cinematic 35mm'). You MUST explicitly include this style signature in EVERY scene's visual_prompt to prevent style-drifting between shots (e.g. NEVER let an anthropomorphic cartoon scene switch to realistic farm animals).
+   - UNIFIED ART STYLE: Establish a single visual aesthetic across all scene beats (e.g. '3D Pixar-inspired cartoon style' or 'photorealistic cinematic 35mm'). You MUST explicitly include this style signature in EVERY scene's image_prompt and visual_prompt to prevent style-drifting between shots (e.g. NEVER let an anthropomorphic cartoon scene switch to realistic farm animals).
    - CHARACTER WARDROBE INTEGRITY: Delineate character attire precisely. Do NOT leak clothing descriptions between characters (e.g. if one character is in a corporate suit and four other characters are casual/unclothed, explicitly describe the four characters as casual/rustic with NO suits so the diffusion model does not dress everyone in suits).
-   - ENVIRONMENT & LIGHTING PERSISTENCE: If consecutive scenes share an environment (e.g. a roadside tea stall with wooden bench, kettle, and dusty road in golden morning sunlight), retain the key environmental descriptors across each scene's visual_prompt.
+   - ENVIRONMENT & LIGHTING PERSISTENCE: If consecutive scenes share an environment (e.g. a roadside tea stall with wooden bench, kettle, and dusty road in golden morning sunlight), retain the key environmental descriptors across each scene's visual_prompt and image_prompt.
 """
         if brief.input_mode == NarrativeInputMode.SCRIPT_ADAPTATION:
             base_prompt += """
@@ -307,9 +308,16 @@ Deconstruct the prompt concept into an original narrative arc with a compelling 
 
         prefix = ASPECT_RATIO_PROMPT_PREFIXES.get(ratio_str, ASPECT_RATIO_PROMPT_PREFIXES["9:16"])
         for scene in plan.scenes:
+            if not getattr(scene, "image_prompt", None):
+                scene.image_prompt = scene.visual_prompt
+            if not getattr(scene, "motion_prompt", None):
+                scene.motion_prompt = scene.visual_prompt
+
             # Prepend framing prefix if not already present
             if not any(token in scene.visual_prompt.lower() for token in ["9:16", "16:9", "1:1", "4:5", "widescreen", "portrait focus"]):
                 scene.visual_prompt = f"{prefix}, {scene.visual_prompt}"
+            if scene.image_prompt and not any(token in scene.image_prompt.lower() for token in ["9:16", "16:9", "1:1", "4:5", "widescreen", "portrait focus"]):
+                scene.image_prompt = f"{prefix}, {scene.image_prompt}"
 
         # Detect and propagate unified art style across all scene beats to prevent style drift
         style_keywords = [
@@ -342,6 +350,11 @@ Deconstruct the prompt concept into an original narrative arc with a compelling 
                         s.visual_prompt = f"{prefix}. {detected_style}. {s.visual_prompt[len(prefix):].lstrip(', ')}"
                     else:
                         s.visual_prompt = f"{detected_style}. {s.visual_prompt}"
+                if s.image_prompt and detected_style.lower() not in s.image_prompt.lower():
+                    if s.image_prompt.startswith(prefix):
+                        s.image_prompt = f"{prefix}. {detected_style}. {s.image_prompt[len(prefix):].lstrip(', ')}"
+                    else:
+                        s.image_prompt = f"{detected_style}. {s.image_prompt}"
 
     def _synthesize_offline_fallback(self, brief: NarrativeBrief) -> DirectorMasterPlan:
         """Deterministic offline narrative synthesizer for pure zero-dependency resilience."""

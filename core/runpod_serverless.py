@@ -354,7 +354,7 @@ class RunPodServerlessClient:
                 safe_frames = calculate_safe_video_frames(beat.duration_sec, fps=16.0)
                 
                 wan_cfg = Wan3WorkflowConfig(
-                    prompt=beat.visual_prompt,
+                    prompt=getattr(beat, "motion_prompt", None) or beat.visual_prompt,
                     negative_prompt="blurry, low quality, distorted anatomy, jitter, artifacts, realistic photography, inconsistent clothing, style drift",
                     width=render_w,
                     height=render_h,

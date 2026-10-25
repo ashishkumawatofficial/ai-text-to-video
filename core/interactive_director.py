@@ -94,7 +94,7 @@ class InteractiveDirector:
         for beat in plan.scenes:
             beat.conditioning_mode = ConditioningEngine.classify_beat_conditioning(beat, previous_beat=prev_beat)
             keyframe_file = generate_local_keyframe(
-                prompt=beat.visual_prompt,
+                prompt=getattr(beat, "image_prompt", None) or beat.visual_prompt,
                 scene_id=f"scene_{beat.beat_index}",
                 width=plan.width,
                 height=plan.height,

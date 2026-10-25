@@ -7,7 +7,9 @@ interface StoryboardCanvasProps {
   beats: StoryboardCard[];
   aspectRatio: string;
   conceptPrompt: string;
-  onRerollBeat: (beatIndex: number, promptOverride?: string) => Promise<void>;
+  projectId?: string;
+  onSelectTake?: (beatIndex: number, takeId: string) => Promise<void>;
+  onRerollBeat: (beatIndex: number, promptOverride?: string, promptType?: 'image' | 'motion') => Promise<void>;
   onUploadBeatImage?: (beatIndex: number, file: File) => Promise<void>;
   onUpdateCard?: (beatIndex: number, updates: Partial<StoryboardCard>) => Promise<void>;
   onRenderBeat?: (beatIndex: number) => Promise<void>;
@@ -20,6 +22,8 @@ export const StoryboardCanvas: React.FC<StoryboardCanvasProps> = ({
   beats,
   aspectRatio,
   conceptPrompt,
+  projectId,
+  onSelectTake,
   onRerollBeat,
   onUploadBeatImage,
   onUpdateCard,
@@ -97,6 +101,8 @@ export const StoryboardCanvas: React.FC<StoryboardCanvasProps> = ({
               key={card.beat_id}
               card={card}
               aspectRatio={aspectRatio}
+              projectId={projectId}
+              onSelectTake={onSelectTake}
               onReroll={onRerollBeat}
               onUploadImage={onUploadBeatImage}
               onUpdateCard={onUpdateCard}

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   RefreshCw,
   Video,
@@ -12,9 +12,14 @@ import {
   Link as LinkIcon,
   Unlink as UnlinkIcon,
   AlertTriangle,
-  AlertCircle
+  AlertCircle,
+  Copy,
+  Check,
+  Image as ImageIcon,
+  Film
 } from 'lucide-react';
 import { StoryboardCard } from '../services/api';
+import { TakeSwitcher } from './TakeSwitcher';
 
 const getVoicePersonaLabel = (actor?: string) => {
   if (!actor || actor === 'auto') return '✨ Auto Voice';
@@ -30,7 +35,9 @@ const getVoicePersonaLabel = (actor?: string) => {
 interface BeatCardProps {
   card: StoryboardCard;
   aspectRatio: string;
-  onReroll: (beatIndex: number, promptOverride?: string) => Promise<void>;
+  projectId?: string;
+  onSelectTake?: (beatIndex: number, takeId: string) => Promise<void>;
+  onReroll: (beatIndex: number, promptOverride?: string, promptType?: 'image' | 'motion') => Promise<void>;
   onUploadImage?: (beatIndex: number, file: File) => Promise<void>;
   onUpdateCard?: (beatIndex: number, updates: Partial<StoryboardCard>) => Promise<void>;
   onRenderBeat?: (beatIndex: number) => Promise<void>;
@@ -43,6 +50,8 @@ interface BeatCardProps {
 export const BeatCard: React.FC<BeatCardProps> = ({
   card,
   aspectRatio,
+  projectId,
+  onSelectTake,
   onReroll,
   onUploadImage,
   onUpdateCard,
@@ -57,18 +66,61 @@ export const BeatCard: React.FC<BeatCardProps> = ({
   const [isRenderingBeat, setIsRenderingBeat] = useState(false);
   const [isChaining, setIsChaining] = useState(false);
   const [isUnlinking, setIsUnlinking] = useState(false);
-  const [isEditingPrompt, setIsEditingPrompt] = useState(false);
-  const [promptText, setPromptText] = useState(card.visual_prompt);
+
+  // Dual-Prompt Inspector State
+  const [activePromptTab, setActivePromptTab] = useState<'image' | 'motion'>('image');
+  const [imagePromptText, setImagePromptText] = useState(card.image_prompt || card.visual_prompt);
+  const [motionPromptText, setMotionPromptText] = useState(card.motion_prompt || card.visual_prompt);
+  const [isEditingImagePrompt, setIsEditingImagePrompt] = useState(false);
+  const [isEditingMotionPrompt, setIsEditingMotionPrompt] = useState(false);
+  const [copiedTab, setCopiedTab] = useState<'image' | 'motion' | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleRerollClick = async () => {
+  // Sync state if card updates from external sources
+  useEffect(() => {
+    if (!isEditingImagePrompt) {
+      setImagePromptText(card.image_prompt || card.visual_prompt);
+    }
+    if (!isEditingMotionPrompt) {
+      setMotionPromptText(card.motion_prompt || card.visual_prompt);
+    }
+  }, [card.image_prompt, card.motion_prompt, card.visual_prompt, isEditingImagePrompt, isEditingMotionPrompt]);
+
+  const handleCopyPrompt = async (type: 'image' | 'motion') => {
+    const textToCopy = type === 'image' ? imagePromptText : motionPromptText;
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      setCopiedTab(type);
+      setTimeout(() => setCopiedTab((curr) => (curr === type ? null : curr)), 2000);
+    } catch (err) {
+      console.error('Failed to copy prompt:', err);
+    }
+  };
+
+  const handleGenerateImageClick = async () => {
     setIsRerolling(true);
     try {
-      await onReroll(card.beat_index, promptText !== card.visual_prompt ? promptText : undefined);
+      const promptToUse = imagePromptText.trim() || card.image_prompt || card.visual_prompt;
+      await onReroll(card.beat_index, promptToUse, 'image');
+      if (onUpdateCard && promptToUse !== card.image_prompt) {
+        await onUpdateCard(card.beat_index, { image_prompt: promptToUse });
+      }
     } finally {
       setIsRerolling(false);
-      setIsEditingPrompt(false);
+      setIsEditingImagePrompt(false);
     }
+  };
+
+  const handleSaveMotionPrompt = async () => {
+    if (onUpdateCard) {
+      const promptToUse = motionPromptText.trim() || card.motion_prompt || card.visual_prompt;
+      await onUpdateCard(card.beat_index, {
+        motion_prompt: promptToUse,
+        visual_prompt: promptToUse,
+      });
+    }
+    setIsEditingMotionPrompt(false);
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -244,40 +296,266 @@ export const BeatCard: React.FC<BeatCardProps> = ({
       </div>
 
       <div className="card-body">
-        {/* Visual Prompt Section */}
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-            <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 700 }}>
-              Diffusion Prompt
-            </span>
-            <button
-              type="button"
-              onClick={() => setIsEditingPrompt(!isEditingPrompt)}
-              style={{ background: 'transparent', border: 'none', color: 'var(--accent-cyan)', fontSize: '0.72rem', cursor: 'pointer' }}
-            >
-              {isEditingPrompt ? 'Cancel' : 'Edit'}
-            </button>
+        {/* Dual-Prompt Inspector (Image Plate vs Video Diffusion Motion) */}
+        <div className="prompt-inspector" style={{ marginBottom: '10px' }}>
+          {/* Tab Selector Header */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '6px', marginBottom: '8px' }}>
+            <div style={{ display: 'flex', gap: '4px' }}>
+              <button
+                type="button"
+                onClick={() => setActivePromptTab('image')}
+                style={{
+                  background: activePromptTab === 'image' ? 'rgba(56, 189, 248, 0.18)' : 'transparent',
+                  border: activePromptTab === 'image' ? '1px solid rgba(56, 189, 248, 0.4)' : '1px solid transparent',
+                  borderRadius: '5px',
+                  color: activePromptTab === 'image' ? '#38bdf8' : 'var(--text-dim)',
+                  fontSize: '0.72rem',
+                  fontWeight: 600,
+                  padding: '3px 8px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <ImageIcon size={12} />
+                <span>Image Plate</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActivePromptTab('motion')}
+                style={{
+                  background: activePromptTab === 'motion' ? 'rgba(168, 85, 247, 0.18)' : 'transparent',
+                  border: activePromptTab === 'motion' ? '1px solid rgba(168, 85, 247, 0.4)' : '1px solid transparent',
+                  borderRadius: '5px',
+                  color: activePromptTab === 'motion' ? '#c084fc' : 'var(--text-dim)',
+                  fontSize: '0.72rem',
+                  fontWeight: 600,
+                  padding: '3px 8px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <Film size={12} />
+                <span>Video Motion</span>
+              </button>
+            </div>
+
+            {/* Quick Actions (Copy & Edit Toggle) */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <button
+                type="button"
+                onClick={() => handleCopyPrompt(activePromptTab)}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderRadius: '4px',
+                  color: copiedTab === activePromptTab ? '#10b981' : 'var(--text-muted)',
+                  fontSize: '0.68rem',
+                  padding: '2px 6px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '3px',
+                }}
+                title={`Copy ${activePromptTab === 'image' ? 'Image' : 'Motion'} Prompt to clipboard`}
+              >
+                {copiedTab === activePromptTab ? <Check size={11} /> : <Copy size={11} />}
+                <span>{copiedTab === activePromptTab ? 'Copied!' : 'Copy'}</span>
+              </button>
+
+              {activePromptTab === 'image' ? (
+                <button
+                  type="button"
+                  onClick={() => setIsEditingImagePrompt(!isEditingImagePrompt)}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--accent-cyan)',
+                    fontSize: '0.7rem',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                  }}
+                >
+                  {isEditingImagePrompt ? 'Cancel' : 'Edit'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsEditingMotionPrompt(!isEditingMotionPrompt)}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#c084fc',
+                    fontSize: '0.7rem',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                  }}
+                >
+                  {isEditingMotionPrompt ? 'Cancel' : 'Edit'}
+                </button>
+              )}
+            </div>
           </div>
 
-          {isEditingPrompt ? (
-            <textarea
-              className="prompt-textarea"
-              style={{ minHeight: '60px', fontSize: '0.8rem' }}
-              value={promptText}
-              onChange={(e) => setPromptText(e.target.value)}
-            />
+          {/* Prompt Body */}
+          {activePromptTab === 'image' ? (
+            <div>
+              {isEditingImagePrompt ? (
+                <div>
+                  <textarea
+                    className="prompt-textarea"
+                    style={{
+                      minHeight: '68px',
+                      fontSize: '0.78rem',
+                      width: '100%',
+                      background: 'rgba(15, 23, 42, 0.7)',
+                      borderColor: 'rgba(56, 189, 248, 0.4)',
+                      padding: '8px',
+                      borderRadius: '6px'
+                    }}
+                    value={imagePromptText}
+                    onChange={(e) => setImagePromptText(e.target.value)}
+                    placeholder="Enter prompt for generating keyframe image..."
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px', marginTop: '6px' }}>
+                    <button
+                      type="button"
+                      disabled={isRerolling || isCardBusy}
+                      onClick={handleGenerateImageClick}
+                      style={{
+                        background: 'linear-gradient(135deg, #0284c7 0%, #2563eb 100%)',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '5px',
+                        padding: '4px 10px',
+                        fontSize: '0.72rem',
+                        fontWeight: 700,
+                        cursor: (isRerolling || isCardBusy) ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        boxShadow: '0 2px 6px rgba(2, 132, 199, 0.3)'
+                      }}
+                    >
+                      <Sparkles size={11} className={isRerolling ? 'spin-slow' : ''} />
+                      <span>{isRerolling ? 'Generating Image...' : 'Generate New Image'}</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <p className="prompt-text" style={{ fontSize: '0.78rem', lineHeight: '1.4', margin: 0 }}>
+                    {imagePromptText}
+                  </p>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }}>
+                    <span style={{ fontSize: '0.66rem', color: 'var(--text-dim)' }}>
+                      🎨 FLUX.1 static plate synthesis
+                    </span>
+                    <button
+                      type="button"
+                      disabled={isRerolling || isCardBusy}
+                      onClick={handleGenerateImageClick}
+                      style={{
+                        background: 'rgba(56, 189, 248, 0.12)',
+                        border: '1px solid rgba(56, 189, 248, 0.3)',
+                        color: '#38bdf8',
+                        borderRadius: '4px',
+                        padding: '3px 8px',
+                        fontSize: '0.68rem',
+                        fontWeight: 600,
+                        cursor: (isRerolling || isCardBusy) ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}
+                      title="Re-generate keyframe image with current prompt"
+                    >
+                      <RefreshCw size={10} className={isRerolling ? 'spin-slow' : ''} />
+                      <span>Generate Image</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           ) : (
-            <p className="prompt-text">{card.visual_prompt}</p>
+            <div>
+              {isEditingMotionPrompt ? (
+                <div>
+                  <textarea
+                    className="prompt-textarea"
+                    style={{
+                      minHeight: '68px',
+                      fontSize: '0.78rem',
+                      width: '100%',
+                      background: 'rgba(15, 23, 42, 0.7)',
+                      borderColor: 'rgba(168, 85, 247, 0.4)',
+                      padding: '8px',
+                      borderRadius: '6px'
+                    }}
+                    value={motionPromptText}
+                    onChange={(e) => setMotionPromptText(e.target.value)}
+                    placeholder="Enter motion dynamics and temporal prompt for video diffusion..."
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px', marginTop: '6px' }}>
+                    <button
+                      type="button"
+                      onClick={handleSaveMotionPrompt}
+                      style={{
+                        background: 'linear-gradient(135deg, #7c3aed 0%, #6366f1 100%)',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '5px',
+                        padding: '4px 10px',
+                        fontSize: '0.72rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }}
+                    >
+                      <Check size={11} />
+                      <span>Save Motion Prompt</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <p className="prompt-text" style={{ fontSize: '0.78rem', lineHeight: '1.4', margin: 0 }}>
+                    {motionPromptText}
+                  </p>
+                  <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: '6px' }}>
+                    <span style={{ fontSize: '0.66rem', color: 'var(--text-dim)' }}>
+                      🎬 Wan 2.1 I2V diffusion & physics
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
         </div>
 
-        {/* Character Dialogue Attribution & Voice Persona */}
-        {card.dialogue_text && (
+        {/* Character Dialogue Attribution & Voice Persona (Optional & Situational) */}
+        {card.dialogue_text && card.dialogue_text.trim() ? (
           <div className="dialogue-box">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px', flexWrap: 'wrap', gap: '4px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontSize: '0.68rem', color: '#f59e0b', background: 'rgba(245, 158, 11, 0.12)', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                  👤 {card.speaker || 'Narrator'}
+                <span style={{
+                  fontSize: '0.68rem',
+                  color: card.speaker && card.speaker.toLowerCase().includes('narrat') ? '#94a3b8' : '#f59e0b',
+                  background: card.speaker && card.speaker.toLowerCase().includes('narrat') ? 'rgba(148, 163, 184, 0.15)' : 'rgba(245, 158, 11, 0.12)',
+                  padding: '2px 6px',
+                  borderRadius: '4px',
+                  fontWeight: 700
+                }}>
+                  {card.speaker && card.speaker.toLowerCase().includes('narrat')
+                    ? `🎙️ ${card.speaker}`
+                    : `👤 ${card.speaker || 'Voiceover'}`}
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -318,6 +596,37 @@ export const BeatCard: React.FC<BeatCardProps> = ({
               "{card.dialogue_text}"
             </p>
           </div>
+        ) : (
+          <div style={{
+            padding: '5px 8px',
+            background: 'rgba(255, 255, 255, 0.03)',
+            border: '1px dashed rgba(255, 255, 255, 0.08)',
+            borderRadius: '4px',
+            fontSize: '0.68rem',
+            color: 'var(--text-dim)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            marginBottom: '6px'
+          }}>
+            <span style={{ color: 'var(--text-muted)' }}>🔇 Non-verbal / Silent Atmosphere</span>
+            {card.speaker && <span>(Subject: {card.speaker})</span>}
+          </div>
+        )}
+
+        {/* Multi-Take History Switcher */}
+        {card.takes && card.takes.length > 0 && (
+          <TakeSwitcher
+            projectId={projectId || ''}
+            beatIndex={card.beat_index}
+            takes={card.takes}
+            activeTakeId={card.active_take_id}
+            onSelectTake={(takeId) => {
+              if (onSelectTake) {
+                onSelectTake(card.beat_index, takeId);
+              }
+            }}
+          />
         )}
       </div>
 
@@ -354,8 +663,8 @@ export const BeatCard: React.FC<BeatCardProps> = ({
               disabled={isRerolling || isCardBusy}
               className="btn-secondary"
               style={{ padding: '3px 6px', fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: '4px' }}
-              onClick={handleRerollClick}
-              title="Re-generate image via AI prompt"
+              onClick={handleGenerateImageClick}
+              title="Re-generate keyframe image via Image Prompt"
             >
               <RefreshCw size={11} className={isRerolling ? 'spin-slow' : ''} />
               <span>{isRerolling ? '...' : 'Re-roll'}</span>

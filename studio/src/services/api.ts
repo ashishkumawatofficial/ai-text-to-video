@@ -1,10 +1,10 @@
-/**
- * Studio API service client interacting with FastAPI backend routes.
- */
+import type { RenderTake, ProjectSummary, CreateProjectParams } from '../types/project';
 
 export interface StoryboardCard {
   beat_id: string;
   beat_index: number;
+  image_prompt?: string;
+  motion_prompt?: string;
   visual_prompt: string;
   keyframe_path: string | null;
   speaker?: string;
@@ -15,6 +15,8 @@ export interface StoryboardCard {
   duration_frames: number;
   render_status: 'pending' | 'in_queue' | 'rendering' | 'completed' | 'failed';
   output_video_path: string | null;
+  active_take_id?: string | null;
+  takes?: RenderTake[];
   edited_by_ai?: boolean;
   is_custom_image?: boolean;
   is_chained?: boolean;
@@ -49,6 +51,7 @@ export interface TelemetryState {
 
 export interface StudioSession {
   session_id: string;
+  title?: string;
   concept_prompt: string;
   aspect_ratio: '16:9' | '9:16' | '1:1';
   directing_mode: 'auto' | 'pro';
@@ -57,6 +60,7 @@ export interface StudioSession {
   chat_history: ChatMessage[];
   telemetry?: TelemetryState;
   master_video_path?: string | null;
+  project_location?: string | null;
   status: string;
 }
 
@@ -91,7 +95,8 @@ export async function generateStoryboard(
 export async function rerollBeat(
   sessionId: string,
   beatIndex: number,
-  promptOverride?: string
+  promptOverride?: string,
+  promptType: 'image' | 'motion' = 'image'
 ): Promise<StoryboardCard> {
   const res = await fetch('/api/storyboard/reroll', {
     method: 'POST',
@@ -100,6 +105,7 @@ export async function rerollBeat(
       session_id: sessionId,
       beat_index: beatIndex,
       prompt_override: promptOverride,
+      target_prompt_type: promptType,
     }),
   });
   if (!res.ok) throw new Error(`Re-roll failed: ${res.statusText}`);
@@ -147,6 +153,8 @@ export interface UpdateBeatParams {
   voicePersona?: string;
   dialogueText?: string;
   visualPrompt?: string;
+  imagePrompt?: string;
+  motionPrompt?: string;
   cameraMotion?: string;
 }
 
@@ -161,6 +169,8 @@ export async function updateStoryboardBeat(params: UpdateBeatParams): Promise<{ 
       voice_persona: params.voicePersona,
       dialogue_text: params.dialogueText,
       visual_prompt: params.visualPrompt,
+      image_prompt: params.imagePrompt,
+      motion_prompt: params.motionPrompt,
       camera_motion: params.cameraMotion,
     }),
   });
@@ -271,4 +281,96 @@ export function subscribeToTelemetry(onTelemetry: (t: TelemetryState) => void): 
     source.close();
   };
 }
+
+// --- Project Workspace & Take History API ---
+
+export async function fetchProjects(): Promise<ProjectSummary[]> {
+  const res = await fetch('/api/projects');
+  if (!res.ok) throw new Error(`Failed to fetch projects: ${res.statusText}`);
+  return res.json();
+}
+
+export async function createProject(params: CreateProjectParams): Promise<StudioSession> {
+  const res = await fetch('/api/projects', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to create project: ${res.statusText}`);
+  }
+  const data = await res.json();
+  return data.project || data;
+}
+
+export async function getProject(projectId: string): Promise<StudioSession> {
+  const res = await fetch(`/api/projects/${projectId}`);
+  if (!res.ok) throw new Error(`Failed to load project ${projectId}: ${res.statusText}`);
+  return res.json();
+}
+
+export async function updateProject(
+  projectId: string,
+  title?: string,
+  prompt?: string
+): Promise<StudioSession> {
+  const res = await fetch(`/api/projects/${projectId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, prompt }),
+  });
+  if (!res.ok) throw new Error(`Failed to update project: ${res.statusText}`);
+  return res.json();
+}
+
+export async function deleteProject(projectId: string): Promise<{ status: string; project_id: string }> {
+  const res = await fetch(`/api/projects/${projectId}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error(`Failed to delete project: ${res.statusText}`);
+  return res.json();
+}
+
+export async function duplicateProject(projectId: string): Promise<StudioSession> {
+  const res = await fetch(`/api/projects/${projectId}/duplicate`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error(`Failed to duplicate project: ${res.statusText}`);
+  const data = await res.json();
+  return data.project || data;
+}
+
+export async function setActiveTake(
+  projectId: string,
+  beatIndex: number,
+  takeId: string
+): Promise<{ status: string; beat_index: number; active_take_id: string; output_video_path: string }> {
+  const res = await fetch(`/api/projects/${projectId}/beats/${beatIndex}/active-take`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ take_id: takeId }),
+  });
+  if (!res.ok) throw new Error(`Failed to set active take: ${res.statusText}`);
+  return res.json();
+}
+
+export async function revealProjectFolder(projectId: string): Promise<{ status: string; project_id: string }> {
+  const res = await fetch(`/api/projects/${projectId}/reveal-folder`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error(`Failed to reveal project folder: ${res.statusText}`);
+  return res.json();
+}
+
+export async function pickDirectory(): Promise<string | null> {
+  const res = await fetch('/api/filesystem/pick-directory', {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error(`Failed to open folder picker: ${res.statusText}`);
+  const data = await res.json();
+  return data.selected_path || null;
+}
+
+
 

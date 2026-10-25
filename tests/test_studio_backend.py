@@ -172,3 +172,55 @@ def test_voice_persona_in_studio_chat_and_generation(client):
     assert chat_data["applied_delta"]["new_value"] == "kid"
     assert chat_data["updated_beats"][0]["voice_actor"] == "kid"
 
+
+def test_dual_prompt_separation_and_reroll(client):
+    """Verifies image_prompt and motion_prompt are decoupled, editable, and rerollable independently."""
+    payload = {
+        "prompt": "A lone astronaut walking in a neon cyberpunk wasteland",
+        "aspect_ratio": "16:9",
+        "genre": "cinematic",
+        "directing_mode": "pro",
+        "backend": "local"
+    }
+
+    resp = client.post("/api/storyboard/generate", json=payload)
+    assert resp.status_code == 200
+    session_data = resp.json()
+    beats = session_data["beats"]
+    assert len(beats) > 0
+    first_beat = beats[0]
+    assert "image_prompt" in first_beat and first_beat["image_prompt"] is not None
+    assert "motion_prompt" in first_beat and first_beat["motion_prompt"] is not None
+
+    session_id = session_data["session_id"]
+
+    # 1. Update both prompts explicitly via patch
+    patch_resp = client.patch("/api/storyboard/beat", json={
+        "session_id": session_id,
+        "beat_index": 0,
+        "image_prompt": "Ultra-detailed static wide shot of a lone astronaut in glowing armor",
+        "motion_prompt": "Slow camera push-in, neon particles floating through the wind",
+        "speaker": None,
+        "dialogue_text": ""
+    })
+    assert patch_resp.status_code == 200
+    updated_beat = patch_resp.json()["beat"]
+    assert updated_beat["image_prompt"] == "Ultra-detailed static wide shot of a lone astronaut in glowing armor"
+    assert updated_beat["motion_prompt"] == "Slow camera push-in, neon particles floating through the wind"
+    assert updated_beat["speaker"] is None
+    assert updated_beat["dialogue_text"] == ""
+
+    # 2. Reroll specifically with target_prompt_type="image"
+    reroll_resp = client.post("/api/storyboard/reroll", json={
+        "session_id": session_id,
+        "beat_index": 0,
+        "prompt_override": "Tweak: Golden hour lighting on astronaut helmet",
+        "target_prompt_type": "image"
+    })
+    assert reroll_resp.status_code == 200
+    rerolled_beat = reroll_resp.json()
+    assert rerolled_beat["image_prompt"] == "Tweak: Golden hour lighting on astronaut helmet"
+    # motion_prompt remains intact!
+    assert rerolled_beat["motion_prompt"] == "Slow camera push-in, neon particles floating through the wind"
+
+

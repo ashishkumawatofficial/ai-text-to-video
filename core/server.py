@@ -31,9 +31,12 @@ from core.models import (
     StoryboardSession,
     StoryboardBeat,
     ConditioningMode,
+    RenderTake,
+    ProjectSummary,
 )
 from core.config import get_gemini_api_keys, get_gemini_api_key, get_runpod_serverless_endpoint_id
 from core.interactive_director import InteractiveDirector
+from core.project_manager import ProjectManager
 from core.runpod_serverless import RunPodServerlessClient
 from core.runpod_client import check_endpoint_health
 from core.chain_manager import extract_terminal_frame
@@ -68,9 +71,28 @@ app.mount("/cache", StaticFiles(directory=str(_CACHE_DIR)), name="cache")
 _ACTIVE_SESSIONS: Dict[str, StudioSession] = {}
 _ACTIVE_TELEMETRY: Dict[str, TelemetryState] = {}
 _ACTIVE_DIRECTORS: Dict[str, InteractiveDirector] = {}
+project_manager = ProjectManager()
 
 
 # --- Request/Response DTOs ---
+
+class CreateProjectRequest(BaseModel):
+    title: str = ""
+    prompt: str = ""
+    aspect_ratio: str = "16:9"
+    directing_mode: str = "pro"
+    backend: str = "serverless"
+    voice_persona: Optional[str] = "auto"
+    custom_location: Optional[str] = None
+
+
+class UpdateProjectRequest(BaseModel):
+    title: Optional[str] = None
+    prompt: Optional[str] = None
+
+
+class SetActiveTakeRequest(BaseModel):
+    take_id: str
 
 class GenerateStoryboardRequest(BaseModel):
     prompt: str
@@ -85,6 +107,7 @@ class RerollBeatRequest(BaseModel):
     session_id: str
     beat_index: int
     prompt_override: Optional[str] = None
+    target_prompt_type: Optional[str] = "image"  # "image" | "motion"
 
 
 class DirectorChatRequest(BaseModel):
@@ -99,6 +122,8 @@ class StoryboardCardUpdateRequest(BaseModel):
     voice_persona: Optional[str] = None
     dialogue_text: Optional[str] = None
     visual_prompt: Optional[str] = None
+    image_prompt: Optional[str] = None
+    motion_prompt: Optional[str] = None
     camera_motion: Optional[str] = None
 
 
@@ -161,23 +186,206 @@ async def health_check() -> Dict[str, Any]:
     }
 
 
+# --- Project Workspace Routes ---
+
+@app.get("/api/projects", response_model=List[ProjectSummary])
+async def list_projects() -> List[ProjectSummary]:
+    """Returns a list of all existing and legacy projects for the dashboard."""
+    return project_manager.list_projects()
+
+
+@app.post("/api/projects")
+async def create_project_endpoint(req: CreateProjectRequest) -> Dict[str, Any]:
+    """Initializes a new isolated project workspace and persists project.json."""
+    session = project_manager.create_project(
+        title=req.title,
+        prompt=req.prompt,
+        aspect_ratio=req.aspect_ratio,
+        directing_mode=req.directing_mode,
+        backend_strategy=req.backend,
+        voice_persona=req.voice_persona or "auto",
+        custom_location=req.custom_location,
+    )
+
+    # If a prompt is provided, automatically plan narrative beats and keyframes
+    if req.prompt and req.prompt.strip():
+        try:
+            director = InteractiveDirector()
+            _ACTIVE_DIRECTORS[session.session_id] = director
+            aspect_enum = VideoAspectRatio.WIDESCREEN_16_9 if req.aspect_ratio == "16:9" else VideoAspectRatio.VERTICAL_9_16
+            session_plan = director.create_storyboard(
+                prompt=req.prompt,
+                aspect_ratio=aspect_enum,
+                session_id=session.session_id,
+                voice_override=req.voice_persona or "auto",
+            )
+            cards: List[StoryboardCard] = []
+            keyframes_dir = project_manager.get_media_dir(session.session_id, "keyframes")
+            for scene in session_plan.plan.scenes:
+                idx = scene.beat_index - 1
+                keyframe_url = None
+                if scene.keyframe_image_path and os.path.exists(scene.keyframe_image_path):
+                    dest_kf = keyframes_dir / f"beat_{idx + 1}_{os.path.basename(scene.keyframe_image_path)}"
+                    try:
+                        shutil.copy2(scene.keyframe_image_path, str(dest_kf))
+                        try:
+                            rel_path = dest_kf.relative_to(_WORKSPACE_ROOT)
+                            keyframe_url = f"/{rel_path}"
+                        except ValueError:
+                            keyframe_url = f"/api/projects/{session.session_id}/media/keyframes/{dest_kf.name}"
+                    except Exception:
+                        try:
+                            rel_path = os.path.relpath(scene.keyframe_image_path, str(_WORKSPACE_ROOT))
+                            keyframe_url = f"/{rel_path}"
+                        except Exception:
+                            keyframe_url = None
+
+                cards.append(
+                    StoryboardCard(
+                        beat_id=f"beat_{idx}",
+                        beat_index=idx,
+                        visual_prompt=scene.visual_prompt,
+                        image_prompt=getattr(scene, "image_prompt", None) or scene.visual_prompt,
+                        motion_prompt=getattr(scene, "motion_prompt", None) or scene.visual_prompt,
+                        keyframe_path=keyframe_url,
+                        dialogue_text=scene.dialogue_text or "",
+                        speaker=getattr(scene, "speaker", None),
+                        voice_actor=scene.voice_persona or session_plan.plan.voice_persona or req.voice_persona or "auto",
+                        camera_motion=scene.camera_movement or "push_in",
+                        duration_seconds=scene.duration_sec,
+                        duration_frames=int(scene.duration_sec * 16),
+                        render_status="pending",
+                        output_video_path=scene.output_video_path,
+                    )
+                )
+            session.beats = cards
+            session.status = "storyboard_ready"
+            project_manager.save_project(session)
+        except Exception as e:
+            print(f"⚠️ Storyboard auto-generation for project {session.session_id} failed: {e}")
+
+    _ACTIVE_SESSIONS[session.session_id] = session
+    return {"status": "created", "project_id": session.session_id, "project": session}
+
+
+@app.get("/api/projects/{project_id}")
+async def get_project_endpoint(project_id: str) -> StudioSession:
+    """Retrieves full project workspace state."""
+    if project_id in _ACTIVE_SESSIONS:
+        return _ACTIVE_SESSIONS[project_id]
+
+    project = project_manager.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+
+    _ACTIVE_SESSIONS[project_id] = project
+    return project
+
+
+@app.patch("/api/projects/{project_id}")
+async def update_project_endpoint(project_id: str, req: UpdateProjectRequest) -> Dict[str, Any]:
+    """Updates project title or concept prompt."""
+    project = project_manager.update_project_metadata(project_id, title=req.title, prompt=req.prompt)
+    if not project:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+    _ACTIVE_SESSIONS[project_id] = project
+    return {"status": "updated", "project_id": project_id, "project": project}
+
+
+@app.delete("/api/projects/{project_id}")
+async def delete_project_endpoint(project_id: str) -> Dict[str, Any]:
+    """Deletes a project directory and its media assets."""
+    success = project_manager.delete_project(project_id)
+    _ACTIVE_SESSIONS.pop(project_id, None)
+    _ACTIVE_DIRECTORS.pop(project_id, None)
+    _ACTIVE_TELEMETRY.pop(project_id, None)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found or could not be deleted")
+    return {"status": "deleted", "project_id": project_id}
+
+
+@app.post("/api/projects/{project_id}/duplicate")
+async def duplicate_project_endpoint(project_id: str) -> Dict[str, Any]:
+    """Duplicates an existing project into a new workspace with cloned beats."""
+    cloned = project_manager.duplicate_project(project_id)
+    if not cloned:
+        raise HTTPException(status_code=404, detail=f"Source project {project_id} not found")
+    _ACTIVE_SESSIONS[cloned.session_id] = cloned
+    return {"status": "duplicated", "project": cloned}
+
+
+@app.post("/api/projects/{project_id}/reveal-folder")
+async def reveal_project_folder_endpoint(project_id: str) -> Dict[str, Any]:
+    """Opens the native file manager (Finder/Explorer) pointing to the project folder."""
+    success = project_manager.reveal_in_finder(project_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Project folder for {project_id} not found")
+    return {"status": "revealed", "project_id": project_id}
+
+
+@app.post("/api/filesystem/pick-directory")
+async def pick_directory_endpoint() -> Dict[str, Any]:
+    """Launches the native OS directory picker dialog and returns the selected folder path."""
+    chosen_path = project_manager.pick_directory_dialog()
+    return {"status": "ok", "selected_path": chosen_path}
+
+
+@app.get("/api/projects/{project_id}/media/{subfolder}/{filename}")
+async def get_project_media_file(project_id: str, subfolder: str, filename: str):
+    """Serves a media asset (keyframe, audio, clip, export) from any project workspace location."""
+    media_dir = project_manager.get_media_dir(project_id, subfolder)
+    file_path = media_dir / filename
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Media file not found")
+
+    ext = file_path.suffix.lower()
+    media_type = "application/octet-stream"
+    if ext in [".jpg", ".jpeg"]:
+        media_type = "image/jpeg"
+    elif ext == ".png":
+        media_type = "image/png"
+    elif ext == ".mp4":
+        media_type = "video/mp4"
+    elif ext == ".mp3":
+        media_type = "audio/mpeg"
+    elif ext == ".wav":
+        media_type = "audio/wav"
+
+    return FileResponse(path=str(file_path), media_type=media_type)
+
+
+@app.post("/api/projects/{project_id}/beats/{beat_index}/active-take")
+async def set_active_take_endpoint(project_id: str, beat_index: int, req: SetActiveTakeRequest) -> Dict[str, Any]:
+    """Switches which take is active for a specific narrative beat."""
+    take = project_manager.set_active_take(project_id, beat_index, req.take_id)
+    if not take:
+        raise HTTPException(status_code=404, detail=f"Take {req.take_id} not found for beat {beat_index}")
+    sess = project_manager.get_project(project_id)
+    if sess:
+        _ACTIVE_SESSIONS[project_id] = sess
+    return {
+        "status": "active_take_updated",
+        "beat_index": beat_index,
+        "active_take_id": take.take_id,
+        "output_video_path": take.video_path,
+    }
+
+
 @app.get("/api/session/{session_id}")
 async def get_session(session_id: str) -> StudioSession:
     """Retrieve full active state of a studio session."""
+    if session_id in _ACTIVE_SESSIONS:
+        return _ACTIVE_SESSIONS[session_id]
+
+    # Check project manager first
+    proj = project_manager.get_project(session_id)
+    if proj:
+        _ACTIVE_SESSIONS[session_id] = proj
+        return proj
+
     director = _ACTIVE_DIRECTORS.get(session_id) or InteractiveDirector()
     _ACTIVE_DIRECTORS[session_id] = director
     sb_session = getattr(director, "session_manager", None) and director.session_manager.load_session(session_id)
-
-    if session_id in _ACTIVE_SESSIONS:
-        sess = _ACTIVE_SESSIONS[session_id]
-        if sb_session and sb_session.plan:
-            for card in sess.beats:
-                scene = next((s for s in sb_session.plan.scenes if s.beat_index == card.beat_index + 1), None)
-                if scene and scene.output_video_path and os.path.exists(scene.output_video_path):
-                    rel_vid = os.path.relpath(scene.output_video_path, str(_WORKSPACE_ROOT))
-                    card.output_video_path = f"/{rel_vid}"
-                    card.render_status = "completed"
-        return sess
 
     if not sb_session or not sb_session.plan:
         raise HTTPException(status_code=404, detail="Studio session not found")
@@ -270,9 +478,11 @@ async def generate_storyboard(req: GenerateStoryboardRequest) -> StudioSession:
                 beat_id=f"beat_{idx}",
                 beat_index=idx,
                 visual_prompt=scene.visual_prompt,
+                image_prompt=getattr(scene, "image_prompt", None) or scene.visual_prompt,
+                motion_prompt=getattr(scene, "motion_prompt", None) or scene.visual_prompt,
                 keyframe_path=keyframe_url,
                 dialogue_text=scene.dialogue_text or "",
-                speaker=getattr(scene, "speaker", "Narrator") or "Narrator",
+                speaker=getattr(scene, "speaker", None),
                 voice_actor=scene.voice_persona or session_plan.plan.voice_persona or req.voice_persona or "auto",
                 camera_motion=scene.camera_movement or "push_in",
                 duration_seconds=scene.duration_sec,
@@ -284,6 +494,7 @@ async def generate_storyboard(req: GenerateStoryboardRequest) -> StudioSession:
 
     studio_session = StudioSession(
         session_id=session_id,
+        title=session_plan.plan.title or (req.prompt[:36] if req.prompt else "Untitled Video"),
         concept_prompt=req.prompt,
         aspect_ratio=req.aspect_ratio,
         directing_mode=mode_enum,
@@ -293,6 +504,11 @@ async def generate_storyboard(req: GenerateStoryboardRequest) -> StudioSession:
     )
 
     _ACTIVE_SESSIONS[session_id] = studio_session
+    try:
+        project_manager.save_project(studio_session)
+    except Exception as e:
+        print(f"⚠️ Could not save project via project_manager: {e}")
+
     return studio_session
 
 
@@ -314,19 +530,32 @@ async def reroll_beat(req: RerollBeatRequest) -> StoryboardCard:
 
     # If prompt override provided, update card prompt
     if req.prompt_override:
+        if req.target_prompt_type == "motion":
+            target_card.motion_prompt = req.prompt_override
+        else:
+            target_card.image_prompt = req.prompt_override
         target_card.visual_prompt = req.prompt_override
 
-    # Directly trigger fresh keyframe synthesis with force_refresh=True
+    # Directly trigger fresh keyframe synthesis with force_refresh=True using image_prompt
+    prompt_to_synthesize = target_card.image_prompt or target_card.visual_prompt
     beat_num = req.beat_index + 1
     from core.local_visual_mock import generate_local_keyframe
     dim = (832, 480) if session.aspect_ratio == "16:9" else (480, 832) if session.aspect_ratio == "9:16" else (640, 640)
     new_keyframe = generate_local_keyframe(
-        prompt=target_card.visual_prompt,
+        prompt=prompt_to_synthesize,
         scene_id=f"scene_{beat_num}",
         width=dim[0],
         height=dim[1],
         force_refresh=True
     )
+    if project_manager.get_project_dir(session.session_id).exists() or session.session_id.startswith("proj_"):
+        dest_kf = project_manager.get_media_dir(session.session_id, "keyframes") / f"beat_{beat_num}_{uuid.uuid4().hex[:6]}.png"
+        try:
+            shutil.copy2(new_keyframe, str(dest_kf))
+            new_keyframe = str(dest_kf)
+        except Exception:
+            pass
+
     rel_path = os.path.relpath(new_keyframe, str(_WORKSPACE_ROOT))
     target_card.keyframe_path = f"/{rel_path}"
     target_card.edited_by_ai = True
@@ -339,6 +568,8 @@ async def reroll_beat(req: RerollBeatRequest) -> StoryboardCard:
             scene = next((s for s in sb_session.plan.scenes if s.beat_index == beat_num), None)
             if scene:
                 scene.keyframe_image_path = new_keyframe
+                scene.image_prompt = target_card.image_prompt
+                scene.motion_prompt = target_card.motion_prompt
                 scene.visual_prompt = target_card.visual_prompt
                 scene.start_frame_path = new_keyframe
                 director.session_manager.save_session(sb_session)
@@ -346,6 +577,7 @@ async def reroll_beat(req: RerollBeatRequest) -> StoryboardCard:
         pass
     
     session.updated_at = datetime.now(timezone.utc)
+    project_manager.save_project(session)
     return target_card
 
 
@@ -364,13 +596,17 @@ async def upload_beat_image(
     if not target_card:
         raise HTTPException(status_code=404, detail=f"Beat {beat_index} not found")
 
-    # Save uploaded file into temporary uploads directory
-    uploads_dir = _WORKSPACE_ROOT / "outputs" / "temp" / "uploads"
-    uploads_dir.mkdir(parents=True, exist_ok=True)
-
     ext = os.path.splitext(file.filename or "")[1] or ".jpg"
     filename = f"user_keyframe_beat_{beat_index + 1}_{uuid.uuid4().hex[:8]}{ext}"
-    saved_path = uploads_dir / filename
+
+    # Save uploaded file into project keyframes directory if dedicated project, else temp uploads
+    if project_manager.get_project_dir(session_id).exists() or session_id.startswith("proj_"):
+        keyframes_dir = project_manager.get_media_dir(session_id, "keyframes")
+        saved_path = keyframes_dir / filename
+    else:
+        uploads_dir = _WORKSPACE_ROOT / "outputs" / "temp" / "uploads"
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+        saved_path = uploads_dir / filename
 
     content = await file.read()
     with open(saved_path, "wb") as f:
@@ -392,6 +628,7 @@ async def upload_beat_image(
             scene.conditioning_mode = ConditioningMode.START_FRAME_ONLY
 
     session.updated_at = datetime.now(timezone.utc)
+    project_manager.save_project(session)
     return target_card
 
 
@@ -406,19 +643,25 @@ async def update_storyboard_beat(req: StoryboardCardUpdateRequest) -> Dict[str, 
     if not card:
         raise HTTPException(status_code=404, detail=f"Beat index {req.beat_index} not found in session")
 
-    if req.speaker is not None:
+    fields_set = req.model_fields_set
+    if "speaker" in fields_set:
         card.speaker = req.speaker
-    if req.voice_persona is not None:
+    if "voice_persona" in fields_set and req.voice_persona is not None:
         card.voice_actor = req.voice_persona
-    if req.dialogue_text is not None:
+    if "dialogue_text" in fields_set and req.dialogue_text is not None:
         card.dialogue_text = req.dialogue_text
-    if req.visual_prompt is not None:
+    if "image_prompt" in fields_set and req.image_prompt is not None:
+        card.image_prompt = req.image_prompt
+    if "motion_prompt" in fields_set and req.motion_prompt is not None:
+        card.motion_prompt = req.motion_prompt
+    if "visual_prompt" in fields_set and req.visual_prompt is not None:
         card.visual_prompt = req.visual_prompt
-    if req.camera_motion is not None:
+    if "camera_motion" in fields_set and req.camera_motion is not None:
         card.camera_motion = req.camera_motion
 
     card.edited_by_ai = False  # Direct creator edit
     session.updated_at = datetime.now(timezone.utc)
+    project_manager.save_project(session)
 
     # Sync back to StoryboardSession on disk if available
     director = _ACTIVE_DIRECTORS.get(req.session_id)
@@ -427,15 +670,19 @@ async def update_storyboard_beat(req: StoryboardCardUpdateRequest) -> Dict[str, 
         beat_num = req.beat_index + 1
         scene = next((s for s in sb_session.plan.scenes if s.beat_index == beat_num), None)
         if scene:
-            if req.speaker is not None:
+            if "speaker" in fields_set:
                 scene.speaker = req.speaker
-            if req.voice_persona is not None:
+            if "voice_persona" in fields_set and req.voice_persona is not None:
                 scene.voice_persona = req.voice_persona
-            if req.dialogue_text is not None:
+            if "dialogue_text" in fields_set and req.dialogue_text is not None:
                 scene.dialogue_text = req.dialogue_text
-            if req.visual_prompt is not None:
+            if "image_prompt" in fields_set and req.image_prompt is not None:
+                scene.image_prompt = req.image_prompt
+            if "motion_prompt" in fields_set and req.motion_prompt is not None:
+                scene.motion_prompt = req.motion_prompt
+            if "visual_prompt" in fields_set and req.visual_prompt is not None:
                 scene.visual_prompt = req.visual_prompt
-            if req.camera_motion is not None:
+            if "camera_motion" in fields_set and req.camera_motion is not None:
                 scene.camera_movement = req.camera_motion
         director.session_manager.save_session(sb_session)
 
@@ -492,14 +739,16 @@ async def director_chat(req: DirectorChatRequest) -> Dict[str, Any]:
 
         if action == "UPDATE_BEAT" and target_card is not None:
             card = target_card
-            if field == "visual_prompt":
+            if field in ["image_prompt", "visual_prompt"]:
+                if field == "image_prompt":
+                    card.image_prompt = new_val
                 card.visual_prompt = new_val
                 card.edited_by_ai = True
                 # Auto-regenerate keyframe plate so creator sees the visual update immediately
                 from core.local_visual_mock import generate_local_keyframe
                 dim = (832, 480) if session.aspect_ratio == "16:9" else (480, 832) if session.aspect_ratio == "9:16" else (640, 640)
                 new_keyframe = generate_local_keyframe(
-                    prompt=card.visual_prompt,
+                    prompt=card.image_prompt or card.visual_prompt,
                     scene_id=f"scene_{card.beat_index + 1}",
                     width=dim[0],
                     height=dim[1],
@@ -508,6 +757,9 @@ async def director_chat(req: DirectorChatRequest) -> Dict[str, Any]:
                 rel = os.path.relpath(new_keyframe, str(_WORKSPACE_ROOT))
                 card.keyframe_path = f"/{rel}"
                 card.is_custom_image = False
+            elif field == "motion_prompt":
+                card.motion_prompt = new_val
+                card.edited_by_ai = True
             elif field in ["dialogue", "dialogue_text"]:
                 card.dialogue_text = new_val
                 card.edited_by_ai = True
@@ -524,7 +776,7 @@ async def director_chat(req: DirectorChatRequest) -> Dict[str, Any]:
             from core.local_visual_mock import generate_local_keyframe
             dim = (832, 480) if session.aspect_ratio == "16:9" else (480, 832) if session.aspect_ratio == "9:16" else (640, 640)
             new_keyframe = generate_local_keyframe(
-                prompt=card.visual_prompt,
+                prompt=card.image_prompt or card.visual_prompt,
                 scene_id=f"scene_{card.beat_index + 1}",
                 width=dim[0],
                 height=dim[1],
@@ -558,8 +810,13 @@ async def director_chat(req: DirectorChatRequest) -> Dict[str, Any]:
             target_scene = next((s for s in sb_session.plan.scenes if s.beat_index == card.beat_index + 1), None)
             if target_scene:
                 target_scene.visual_prompt = card.visual_prompt
+                if card.image_prompt:
+                    target_scene.image_prompt = card.image_prompt
+                if card.motion_prompt:
+                    target_scene.motion_prompt = card.motion_prompt
                 target_scene.dialogue_text = card.dialogue_text
                 target_scene.camera_movement = card.camera_motion
+                target_scene.speaker = card.speaker
                 if card.keyframe_path and not card.keyframe_path.startswith("http"):
                     target_scene.keyframe_image_path = os.path.join(str(_WORKSPACE_ROOT), card.keyframe_path.lstrip("/"))
         director.session_manager.save_session(sb_session)
@@ -572,6 +829,7 @@ async def director_chat(req: DirectorChatRequest) -> Dict[str, Any]:
     )
     session.chat_history.append(ai_msg)
     session.updated_at = datetime.now(timezone.utc)
+    project_manager.save_project(session)
 
     return {
         "reply": reply_text,
@@ -620,7 +878,7 @@ async def _render_single_beat_core(
         init_image = img_disk_path if (card.is_chained or card.is_custom_image) else None
 
         wan_cfg = Wan3WorkflowConfig(
-            prompt=card.visual_prompt,
+            prompt=card.motion_prompt or card.visual_prompt,
             negative_prompt="blurry, low quality, distorted anatomy, jitter, artifacts, realistic photography, inconsistent clothing, style drift",
             width=render_w,
             height=render_h,
@@ -650,7 +908,7 @@ async def _render_single_beat_core(
             from core.models import SceneBeat
             temp_beat = SceneBeat(
                 beat_index=card.beat_index + 1,
-                visual_prompt=card.visual_prompt,
+                visual_prompt=card.motion_prompt or card.visual_prompt,
                 duration_sec=card.duration_seconds,
                 camera_movement=card.camera_motion,
                 conditioning_mode="start_frame_only" if (card.is_chained or card.is_custom_image) else "pure_t2v",
@@ -666,9 +924,10 @@ async def _render_single_beat_core(
     if not img_disk_path or not os.path.exists(img_disk_path):
         from core.local_visual_mock import generate_local_keyframe, get_cached_keyframe_path
         dim = (1280, 720) if session.aspect_ratio == "16:9" else (720, 1280)
-        img_disk_path = get_cached_keyframe_path(card.visual_prompt)
+        plate_prompt = card.image_prompt or card.visual_prompt
+        img_disk_path = get_cached_keyframe_path(plate_prompt)
         generate_local_keyframe(
-            prompt=card.visual_prompt,
+            prompt=plate_prompt,
             scene_id=f"scene_{card.beat_index + 1}",
             width=dim[0],
             height=dim[1],
@@ -768,8 +1027,25 @@ async def render_single_beat(req: RenderBeatRequest) -> Dict[str, Any]:
             director=director,
         )
 
-        rel = os.path.relpath(output_abs, str(_WORKSPACE_ROOT))
-        card.output_video_path = f"/{rel}"
+        # Record as an isolated take in project_manager
+        take = project_manager.record_beat_take(
+            project_id=session.session_id,
+            beat_index=card.beat_index,
+            source_video_path=output_abs,
+            prompt=card.visual_prompt,
+            camera_motion=card.camera_motion,
+            backend=backend_choice,
+            duration_sec=card.duration_seconds,
+        )
+        if take:
+            card.output_video_path = take.video_path
+            card.active_take_id = take.take_id
+            if not any(t.take_id == take.take_id for t in card.takes):
+                card.takes.append(take)
+        else:
+            rel = os.path.relpath(output_abs, str(_WORKSPACE_ROOT))
+            card.output_video_path = f"/{rel}"
+
         card.render_status = "completed"
 
         # Check if downstream beat was chained from this beat: flag out of sync
@@ -789,12 +1065,15 @@ async def render_single_beat(req: RenderBeatRequest) -> Dict[str, Any]:
             director.session_manager.save_session(sb_session)
 
         session.updated_at = datetime.now(timezone.utc)
+        project_manager.save_project(session)
 
         return {
             "status": "completed",
             "session_id": req.session_id,
             "beat_index": req.beat_index,
             "output_video_path": card.output_video_path,
+            "active_take_id": card.active_take_id,
+            "takes": [t.model_dump() for t in card.takes],
             "beat": card.model_dump(),
         }
     except Exception as e:
@@ -834,10 +1113,14 @@ async def chain_frame_to_next_beat(req: ChainFrameRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"Rendered video clip not found on disk at {source_video_disk}")
 
     # Extract terminal frame
-    temp_dir = os.path.join(str(_WORKSPACE_ROOT), "outputs", "temp")
-    os.makedirs(temp_dir, exist_ok=True)
     chain_filename = f"chain_{session.session_id[:8]}_shot_{req.source_beat_index}_to_{target_beat_index}.png"
-    chain_dest_path = os.path.join(temp_dir, chain_filename)
+    if project_manager.get_project_dir(session.session_id).exists() or session.session_id.startswith("proj_"):
+        keyframes_dir = project_manager.get_media_dir(session.session_id, "keyframes")
+        chain_dest_path = str(keyframes_dir / chain_filename)
+    else:
+        temp_dir = os.path.join(str(_WORKSPACE_ROOT), "outputs", "temp")
+        os.makedirs(temp_dir, exist_ok=True)
+        chain_dest_path = os.path.join(temp_dir, chain_filename)
 
     try:
         extract_terminal_frame(source_video_disk, chain_dest_path)
@@ -867,6 +1150,7 @@ async def chain_frame_to_next_beat(req: ChainFrameRequest) -> Dict[str, Any]:
         director.session_manager.save_session(sb_session)
 
     session.updated_at = datetime.now(timezone.utc)
+    project_manager.save_project(session)
 
     return {
         "status": "chained",
@@ -954,7 +1238,10 @@ async def compile_master_video(req: CompileMasterRequest) -> Dict[str, Any]:
     session = _ACTIVE_SESSIONS[req.session_id]
     completed_cards = [
         c for c in session.beats
-        if c.output_video_path and os.path.exists(os.path.join(str(_WORKSPACE_ROOT), c.output_video_path.lstrip("/")))
+        if c.output_video_path and (
+            os.path.exists(os.path.join(str(_WORKSPACE_ROOT), c.output_video_path.lstrip("/")))
+            or os.path.exists(c.output_video_path)
+        )
     ]
 
     if not req.allow_partial and len(completed_cards) < len(session.beats):
@@ -969,13 +1256,20 @@ async def compile_master_video(req: CompileMasterRequest) -> Dict[str, Any]:
     # Destination master MP4
     temp_dir = os.path.join(str(_WORKSPACE_ROOT), "outputs", "temp")
     os.makedirs(temp_dir, exist_ok=True)
-    master_video_abs = os.path.join(str(_OUTPUTS_DIR), f"{session.session_id}_master.mp4")
+    if project_manager.get_project_dir(session.session_id).exists() or session.session_id.startswith("proj_"):
+        exports_dir = project_manager.get_media_dir(session.session_id, "exports")
+        master_video_abs = str(exports_dir / "master_final.mp4")
+    else:
+        master_video_abs = os.path.join(str(_OUTPUTS_DIR), f"{session.session_id}_master.mp4")
 
     # Fast Concat Assembly
-    valid_clips = [
-        os.path.abspath(os.path.join(str(_WORKSPACE_ROOT), c.output_video_path.lstrip("/")))
-        for c in completed_cards
-    ]
+    valid_clips = []
+    for c in completed_cards:
+        p_rel = os.path.abspath(os.path.join(str(_WORKSPACE_ROOT), c.output_video_path.lstrip("/")))
+        if os.path.exists(p_rel):
+            valid_clips.append(p_rel)
+        elif os.path.exists(c.output_video_path):
+            valid_clips.append(os.path.abspath(c.output_video_path))
 
     concat_list_file = os.path.join(temp_dir, f"concat_{session.session_id[:8]}.txt")
     with open(concat_list_file, "w") as cf:
@@ -1021,6 +1315,7 @@ async def compile_master_video(req: CompileMasterRequest) -> Dict[str, Any]:
     session.master_video_path = f"/{rel_master}"
     session.status = "completed"
     session.updated_at = datetime.now(timezone.utc)
+    project_manager.save_project(session)
 
     # Persist session to disk
     director = _ACTIVE_DIRECTORS.get(req.session_id) or InteractiveDirector()

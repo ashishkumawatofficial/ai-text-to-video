@@ -103,6 +103,8 @@ class StoryboardBeat(BaseModel):
     duration_sec: float = 3.0
     visual_strategy: VisualStrategyRoute = VisualStrategyRoute.FLAT_RATE_DIFFUSION
     visual_prompt: str = ""
+    image_prompt: Optional[str] = None
+    motion_prompt: Optional[str] = None
     dialogue_text: Optional[str] = None
     image_assets: List[ImageAsset] = Field(default_factory=list)
     continuity: ContinuityLink = Field(default_factory=ContinuityLink)
@@ -233,6 +235,8 @@ class SceneBeatPlan(BaseModel):
     conditioning_mode: ConditioningMode = ConditioningMode.START_FRAME_ONLY
     camera_movement: str = "slow_push_in"
     visual_prompt: str
+    image_prompt: Optional[str] = None
+    motion_prompt: Optional[str] = None
     speaker: Optional[str] = "Narrator"
     voice_persona: Optional[str] = None
     keyframe_image_path: Optional[str] = None
@@ -251,6 +255,10 @@ class SceneBeatPlan(BaseModel):
             self.name = self.beat_title
         if not self.scene_id:
             self.scene_id = f"scene_{self.beat_index}"
+        if not self.image_prompt:
+            self.image_prompt = self.visual_prompt
+        if not self.motion_prompt:
+            self.motion_prompt = self.visual_prompt
 
 
 SceneBeat = SceneBeatPlan  # Backward compatible alias
@@ -450,12 +458,26 @@ class DirectingMode(str, Enum):
     PRO = "pro"
 
 
+class RenderTake(BaseModel):
+    take_id: str = Field(default_factory=lambda: f"take_{uuid.uuid4().hex[:8]}")
+    beat_index: int
+    take_index: int = 1
+    video_path: str
+    prompt: str = ""
+    camera_motion: str = "push_in"
+    backend: str = "serverless"
+    duration_sec: float = 3.0
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
 class StoryboardCard(BaseModel):
     beat_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     beat_index: int
     visual_prompt: str
+    image_prompt: Optional[str] = None
+    motion_prompt: Optional[str] = None
     keyframe_path: Optional[str] = None
-    speaker: str = "Narrator"
+    speaker: Optional[str] = "Narrator"
     dialogue_text: str = ""
     voice_actor: str = "en-US-ChristopherNeural"
     camera_motion: str = "push_in"
@@ -463,12 +485,20 @@ class StoryboardCard(BaseModel):
     duration_frames: int = 49
     render_status: str = "pending"
     output_video_path: Optional[str] = None
+    active_take_id: Optional[str] = None
+    takes: List[RenderTake] = Field(default_factory=list)
     edited_by_ai: bool = False
     is_custom_image: bool = False
     is_chained: bool = False
     chained_from_beat: Optional[int] = None
     chain_out_of_sync: bool = False
     error_message: Optional[str] = None
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.image_prompt:
+            self.image_prompt = self.visual_prompt
+        if not self.motion_prompt:
+            self.motion_prompt = self.visual_prompt
 
 
 class ChatMessage(BaseModel):
@@ -497,6 +527,7 @@ class TelemetryState(BaseModel):
 
 class StudioSession(BaseModel):
     session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    title: str = ""
     concept_prompt: str = ""
     aspect_ratio: str = "16:9"
     directing_mode: DirectingMode = DirectingMode.PRO
@@ -505,8 +536,28 @@ class StudioSession(BaseModel):
     chat_history: List[ChatMessage] = Field(default_factory=list)
     telemetry: Optional[TelemetryState] = None
     master_video_path: Optional[str] = None
+    project_location: Optional[str] = None
     status: str = "draft"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class ProjectSummary(BaseModel):
+    project_id: str
+    title: str
+    concept_prompt: str = ""
+    aspect_ratio: str = "16:9"
+    directing_mode: str = "pro"
+    status: str = "draft"
+    total_duration_sec: float = 0.0
+    beat_count: int = 0
+    completed_beats_count: int = 0
+    total_takes_count: int = 0
+    thumbnail_url: Optional[str] = None
+    master_video_path: Optional[str] = None
+    project_location: Optional[str] = None
+    created_at: str
+    updated_at: str
+    is_legacy: bool = False
 
 

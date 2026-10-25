@@ -14,14 +14,23 @@ from core.models import (
 )
 
 
-DEFAULT_SESSIONS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "outputs", "temp", "sessions"))
+def get_default_sessions_dir() -> str:
+    if os.environ.get("TEST_MODE") == "1":
+        path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "outputs", "temp", "test_sessions"))
+    else:
+        path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "outputs", "temp", "sessions"))
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+DEFAULT_SESSIONS_DIR = get_default_sessions_dir()
 
 
 class StoryboardSessionManager:
     """Manages file-persisted storyboard review sessions and delta modifications."""
 
-    def __init__(self, sessions_dir: str = DEFAULT_SESSIONS_DIR):
-        self.sessions_dir = sessions_dir
+    def __init__(self, sessions_dir: Optional[str] = None):
+        self.sessions_dir = sessions_dir or get_default_sessions_dir()
         os.makedirs(self.sessions_dir, exist_ok=True)
 
     def _get_session_path(self, session_id: str) -> str:
@@ -50,9 +59,12 @@ class StoryboardSessionManager:
         path = self._get_session_path(session_id)
         if not os.path.exists(path):
             return None
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return StoryboardSession.model_validate(data)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return StoryboardSession.model_validate(data)
+        except Exception:
+            return None
 
     def save_session(self, session: StoryboardSession) -> str:
         """Serializes and saves the active session state."""
