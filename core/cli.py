@@ -53,7 +53,7 @@ def main():
     direct_parser.add_argument("--prompt", "-p", type=str, required=True, help="Natural language concept, long script text, or file path")
     direct_parser.add_argument("--aspect-ratio", "-ar", choices=["9:16", "16:9", "1:1", "4:5"], default="9:16", help="Canvas aspect ratio (default: 9:16 vertical)")
     direct_parser.add_argument("--input-mode", "-im", choices=["concept_expansion", "script_adaptation"], default="concept_expansion", help="Input mode: concept_expansion (default) or script_adaptation")
-    direct_parser.add_argument("--model", type=str, default=None, help="Model override (e.g. gemini-2.5-flash, gpt-4o, offline)")
+    direct_parser.add_argument("--model", type=str, default=None, help="Model override (e.g. gemini-3.8-flash, gpt-4o, offline)")
     direct_parser.add_argument("--character", "-c", action="append", default=[], help="Character reference (format: 'name:path/to/img.jpg')")
     direct_parser.add_argument("--environment", "-e", type=str, default=None, help="Environment reference image path")
     direct_parser.add_argument("--start-frame", "-s", type=str, default=None, help="Explicit start frame path")

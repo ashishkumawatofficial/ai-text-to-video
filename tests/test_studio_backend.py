@@ -224,3 +224,78 @@ def test_dual_prompt_separation_and_reroll(client):
     assert rerolled_beat["motion_prompt"] == "Slow camera push-in, neon particles floating through the wind"
 
 
+def test_replan_storyboard_preserves_session(client):
+    """Verifies that re-planning an active storyboard with session_id preserves identity and updates beats."""
+    # 1. Initial storyboard generation
+    resp = client.post("/api/storyboard/generate", json={
+        "prompt": "A brave deep-sea diver discovering an underwater bioluminescent cave",
+        "aspect_ratio": "16:9",
+        "genre": "cinematic",
+        "directing_mode": "pro",
+        "backend": "local"
+    })
+    assert resp.status_code == 200
+    initial_session = resp.json()
+    orig_session_id = initial_session["session_id"]
+    assert initial_session["concept_prompt"] == "A brave deep-sea diver discovering an underwater bioluminescent cave"
+    assert len(initial_session["beats"]) > 0
+
+    # 2. Re-plan storyboard with updated script and existing session_id
+    replan_resp = client.post("/api/storyboard/generate", json={
+        "session_id": orig_session_id,
+        "prompt": "A brave deep-sea diver encounters a giant crystalline leviathan glowing in turquoise light",
+        "aspect_ratio": "16:9",
+        "genre": "cinematic",
+        "directing_mode": "pro",
+        "backend": "local"
+    })
+    assert replan_resp.status_code == 200
+    replanned_session = replan_resp.json()
+
+    # Session ID must be strictly preserved
+    assert replanned_session["session_id"] == orig_session_id
+    # Concept prompt is updated
+    assert replanned_session["concept_prompt"] == "A brave deep-sea diver encounters a giant crystalline leviathan glowing in turquoise light"
+    assert len(replanned_session["beats"]) > 0
+    # Chat history records the replan note
+    assert len(replanned_session["chat_history"]) >= 1
+    assert any("re-planned" in msg["text"].lower() for msg in replanned_session["chat_history"])
+
+
+def test_render_single_beat_modality_variable_scope(client):
+    """Verifies that POST /api/render/beat executes cleanly without VideoGenerationModality scope error."""
+    # 1. Create a session with a beat card
+    session_id = "test-session-render-scope"
+    test_session = StudioSession(
+        session_id=session_id,
+        concept_prompt="A futuristic hovercar speeding through neon rain",
+        aspect_ratio="16:9",
+        backend_strategy="local",
+        beats=[
+            StoryboardCard(
+                beat_id="beat_0",
+                beat_index=0,
+                visual_prompt="Hovercar gliding across wet asphalt under holographic billboards",
+                motion_prompt="Camera follows closely behind hovercar as thrusters flare with blue flame",
+                image_prompt="Cinematic wide shot of sleek aerodynamic hovercar parked on neon street",
+                duration_seconds=3.0,
+                render_status="pending",
+                model_id="kling-v1.5",
+            )
+        ]
+    )
+    _ACTIVE_SESSIONS[session_id] = test_session
+
+    # 2. Invoke single beat render
+    resp = client.post("/api/render/beat", json={
+        "session_id": session_id,
+        "beat_index": 0,
+        "backend": "local"
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "video_path" in data or "status" in data
+
+
+
+

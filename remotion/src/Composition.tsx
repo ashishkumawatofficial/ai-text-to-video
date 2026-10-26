@@ -90,6 +90,7 @@ export const UniversalComposition: React.FC<UniversalVideoProps> = ({
               {scene.type === 'video_clip' && scene.mediaSrc && (
                 <Video
                   src={resolveSrc(scene.mediaSrc)}
+                  volume={scene.hasClipAudio ? (scene.audioVolume ?? 1.0) : 0}
                   style={{
                     width: '100%',
                     height: '100%',
@@ -144,7 +145,7 @@ export const UniversalComposition: React.FC<UniversalVideoProps> = ({
       <KineticSubtitles subtitles={subtitles} fps={fps} />
 
       {/* 3. Audio Mixer & Ducking Layer */}
-      <AudioMixer audio={audio} subtitles={subtitles} fps={fps} />
+      <AudioMixer audio={audio} subtitles={subtitles} fps={fps} scenes={scenes} />
     </AbsoluteFill>
   );
 };

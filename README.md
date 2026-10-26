@@ -13,7 +13,7 @@
 2. **Dynamic AI Story Writer & Multi-Tier Cascade**:
    - Automatically expands creative concepts into rich multi-scene cinematic narratives with custom dialogue, camera motion, and audio cues.
    - Ingests long-form scripts or articles (`--input-mode script_adaptation`) while preserving 100% of the author's original dialogue.
-   - Resilient multi-tier model cascade (`gemini-2.5-flash`/`pro` ➔ `gpt-4o` ➔ `gemini-1.5-flash` ➔ offline rule engine fallback with zero crashes).
+   - Resilient multi-tier model cascade (`gemini-3.8-flash`/`pro` ➔ `gpt-4o` ➔ `gemini-1.5-flash` ➔ offline rule engine fallback with zero crashes; transparent forward aliasing for `gemini-2.5-flash` and `gemini-2.0-flash`).
 3. **Multi-Character Spoken Dialogue Attribution**:
    - Automatically parses distinct speaking characters (e.g. `[Daisy]`, `[Barnaby]`, `[Narrator]`) and assigns distinct neural voice personas (`cartoon_animal`, `male_casual`, `female_sarcastic`, `deep_villain`, `kid`).
    - Synthesizes per-scene dialogue audio and stitches tracks into a master composite with global word-level kinetic subtitle alignment.
@@ -33,6 +33,21 @@
    - Word-by-word kinetic animated subtitles synchronized to Whisper speech timestamps.
    - SVG radial countdown dials with audible tick sounds.
    - Speech-aware automatic audio ducking for background music.
+9. **Dual-Channel Video Rendering & Dynamic Cost Arbitrage**:
+   - **Channel 1 (Self-Deployed Serverless)**: RunPod Wan 2.1 / Wan 3.0 serverless worker with multi-tier audio synthesis (Cloudflare, Puter, Edge-TTS).
+   - **Channel 2 (Multi-Model Provider Gateway)**: Real-time price quotation and ranking across `fal.ai`, `apidot.ai`, and `kie.ai`. The system automatically routes jobs to whichever provider delivers the lowest cost for the chosen model (Kling, Seedance, Runway, MiniMax, Wan, CogVideoX).
+10. **Zero-Cost Failure Insurance**:
+   - All provider adapters enforce a zero-cost guarantee: 5xx server errors, queue timeouts, and worker crashes cost strictly $0.00 before gracefully cascading to the next verified provider.
+11. **Render-Time Prompt Compilation & Pure-Motion I2V**:
+   - **Decoupled Story Generation**: Storywriter produces pure narrative scripts without truncating to any single video model budget prematurely.
+   - **Late-Stage Prompt Compilation (`PromptCompiler`)**: Dynamically compiles final render prompts at dispatch time using model-specific character limits, target audio syntax, and pure-motion kinetic transforms for Image-to-Video (stripping static visual descriptions while preserving character actions).
+   - **Context-Aware Dynamic Negative Prompting (`NegativePromptCompiler`)**: Style-calibrated negative prompts ensure live-action photorealistic renders never include contradictory tags like `"realistic photography"`.
+12. **Native Video Audio Integration & Collision-Free Remotion Mix**:
+   - Injects model-specific audio tags (`<d>...</d>` for MiniMax, spoken cues for Kling/Seedance/Veo, native flags for Wan 3.0) when native audio is selected.
+   - When a clip contains native audio (`hasClipAudio: true`), Remotion un-mutes the video track (`volume={1.0}`), mutes overlapping synthetic voiceover (`volume={0.0}`), and ducks BGM to an ambient bed (0.08) to eliminate double-talking.
+13. **Incremental Video Extending & 4K Super-Resolution**:
+   - Incremental +4s/+5s video clip extension billed only for the added seconds.
+   - 4K Ultra-HD super-resolution upscaling via Topaz Video AI or Real-ESRGAN/Lanczos neural plate pipeline.
 
 ---
 
@@ -43,19 +58,30 @@ flowchart TD
     A["User Input (Prompt OR Studio Manifest)"] --> B["Director / Manifest Parser"]
     B --> C["Audio Engine (Edge-TTS + Faster-Whisper Word Alignment)"]
     
-    B --> D{"Tri-Strategy Visual Router"}
-    D -- "Riddle / Logic" --> E["Strategy 1: Programmatic Hybrid<br/>(Clean Sprites + Stationary Plates)"]
-    D -- "State Change" --> F["Strategy 2: Dual Frame Guided Diffusion"]
-    D -- "Story / Action" --> G["Strategy 3: Unmetered GPU Diffusion<br/>(RunPod ComfyUI RTX 4090)"]
+    B --> D{"Dual-Channel Visual Router"}
     
-    G -. "Frame Chaining" .-> G
+    subgraph Channel1["Channel 1: Self-Deployed Serverless"]
+        D -- "Channel 1" --> S1["RunPod Serverless Wan 2.1 / Wan 3.0"]
+        S1 --> S2["Multi-Tier Audio (Cloudflare / Puter / Edge-TTS)"]
+    end
     
-    E --> H["Remotion Master Compositor"]
-    F --> H
-    G --> H
+    subgraph Channel2["Channel 2: Multi-Model Gateway & Cost Arbitrage"]
+        D -- "Channel 2" --> ARB["Cost Arbitrage Engine<br/>(Live Quote Ranking & Cache)"]
+        ARB --> P1["fal.ai (Lowest Cost?)"]
+        ARB --> P2["apidot.ai (Lowest Cost?)"]
+        ARB --> P3["kie.ai (Lowest Cost?)"]
+        P1 -. "5xx Failover ($0.00)" .-> P2
+        P2 -. "5xx Failover ($0.00)" .-> P3
+    end
+    
+    D -- "Riddle / Plate" --> LOCAL["Deterministic Sprite & Keyframe Plate Engine"]
+    
+    Channel1 --> H["Remotion Master Compositor"]
+    Channel2 --> H
+    LOCAL --> H
     C --> H
     
-    H --> I["Export: 1080x1920 30/60fps Vertical MP4<br/>• Kinetic Word-by-Word Subtitles<br/>• Countdown Dial Overlay<br/>• Speech-Ducked Audio"]
+    H --> I["Export: 1080p / 4K Ultra-HD MP4<br/>• Kinetic Word-by-Word Subtitles<br/>• Native Audio Bypass or Multi-Speaker VO<br/>• Speech-Ducked Audio & BGM Bed"]
 ```
 
 ---
@@ -120,7 +146,7 @@ python -m core.cli direct \
 # 5. Frontier LLM Cascade Override:
 python -m core.cli direct \
   --prompt "Cyberpunk motorcycle chase through Neo-Kyoto alleys" \
-  --model gemini-2.5-flash \
+  --model gemini-3.8-flash \
   --aspect-ratio 16:9 \
   --auto-approve
 

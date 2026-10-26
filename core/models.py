@@ -97,6 +97,12 @@ class CharacterProfile(BaseModel):
 
 
 
+class VideoAudioMode(str, Enum):
+    NATIVE_CLIP_AUDIO = "native_clip_audio"
+    EXTERNAL_SYNTHESIS = "external_synthesis"
+    MUTED = "muted"
+
+
 class StoryboardBeat(BaseModel):
     beat_index: int
     name: str
@@ -106,6 +112,8 @@ class StoryboardBeat(BaseModel):
     image_prompt: Optional[str] = None
     motion_prompt: Optional[str] = None
     dialogue_text: Optional[str] = None
+    audio_mode: VideoAudioMode = VideoAudioMode.EXTERNAL_SYNTHESIS
+    has_native_audio: bool = False
     image_assets: List[ImageAsset] = Field(default_factory=list)
     continuity: ContinuityLink = Field(default_factory=ContinuityLink)
     sound_effects: List[AudioCue] = Field(default_factory=list)
@@ -258,7 +266,9 @@ class SceneBeatPlan(BaseModel):
         if not self.image_prompt:
             self.image_prompt = self.visual_prompt
         if not self.motion_prompt:
-            self.motion_prompt = self.visual_prompt
+            cam = getattr(self, "camera_movement", "slow_push_in") or "slow_push_in"
+            cam_str = str(cam).replace("_", " ").title()
+            self.motion_prompt = f"{cam_str} camera movement, dynamic subject motion and environmental physics: {self.visual_prompt}"
 
 
 SceneBeat = SceneBeatPlan  # Backward compatible alias
@@ -352,15 +362,30 @@ class NarrativeBrief(BaseModel):
             self.width, self.height = ASPECT_RATIO_RESOLUTIONS[ratio_str]
 
 
+LLM_MODEL_ALIASES: Dict[str, str] = {
+    "gemini-2.5-flash": "gemini-3.8-flash",
+    "gemini-2.5-pro": "gemini-3.8-flash",
+    "gemini-2.0-flash": "gemini-3.8-flash",
+    "gemini-2.0-pro": "gemini-3.8-flash",
+    "gemini-1.5-flash": "gemini-3.1-flash-lite",
+    "gemini-1.5-pro": "gemini-pro-latest",
+}
+
+
+def resolve_llm_model(model_name: Optional[str]) -> str:
+    """Resolves model aliases to their modern supported counterparts."""
+    if not model_name:
+        return "gemini-3.8-flash"
+    clean = model_name.strip()
+    return LLM_MODEL_ALIASES.get(clean.lower(), clean)
+
+
 class ModelCascadeConfig(BaseModel):
     provider: ModelProvider = ModelProvider.AUTO
     gemini_models: List[str] = Field(
         default_factory=lambda: [
-            "gemini-3.5-flash",
-            "gemini-3.1-flash-lite",
-            "gemini-flash-latest",
             "gemini-3.8-flash",
-            "gemini-pro-latest",
+            "gemini-3.5-flash",
         ]
     )
     openai_models: List[str] = Field(
@@ -485,6 +510,7 @@ class StoryboardCard(BaseModel):
     duration_frames: int = 49
     render_status: str = "pending"
     output_video_path: Optional[str] = None
+    video_path: Optional[str] = None
     active_take_id: Optional[str] = None
     takes: List[RenderTake] = Field(default_factory=list)
     edited_by_ai: bool = False
@@ -493,12 +519,35 @@ class StoryboardCard(BaseModel):
     chained_from_beat: Optional[int] = None
     chain_out_of_sync: bool = False
     error_message: Optional[str] = None
+    model_id: str = "kling-v1.5"
+    provider_override: str = "auto"
+    allow_provider_cascade: bool = True
+    modality: str = "t2v"
+    resolution: str = "720p"
+    native_audio: bool = False
+    has_clip_audio: bool = False
+    character_budget_ratio: float = 0.0
+    last_quoted_price_usd: Optional[float] = None
+    last_provider_used: Optional[str] = None
+    start_frame_path: Optional[str] = None
+    end_frame_path: Optional[str] = None
+    reference_image_paths: List[str] = Field(default_factory=list)
 
     def model_post_init(self, __context: Any) -> None:
         if not self.image_prompt:
             self.image_prompt = self.visual_prompt
         if not self.motion_prompt:
-            self.motion_prompt = self.visual_prompt
+            cam = getattr(self, "camera_motion", "slow_push_in") or "slow_push_in"
+            cam_str = str(cam).replace("_", " ").title()
+            self.motion_prompt = f"{cam_str} camera movement, dynamic subject motion and environmental physics: {self.visual_prompt}"
+        if self.keyframe_path and not self.start_frame_path:
+            self.start_frame_path = self.keyframe_path
+        elif self.start_frame_path and not self.keyframe_path:
+            self.keyframe_path = self.start_frame_path
+        if self.output_video_path and not self.video_path:
+            self.video_path = self.output_video_path
+        elif self.video_path and not self.output_video_path:
+            self.output_video_path = self.video_path
 
 
 class ChatMessage(BaseModel):
@@ -515,6 +564,11 @@ class TelemetryWorkerTile(BaseModel):
     status: str
     elapsed_seconds: float = 0.0
     progress_percent: int = 0
+    provider_id: Optional[str] = "fal.ai"
+    model_id: Optional[str] = "kling-v2.5"
+    api_status: Optional[str] = "IN_PROGRESS"
+    status_detail: Optional[str] = "Awaiting inference slot"
+    quoted_price_usd: float = 0.0
 
 
 class TelemetryState(BaseModel):
@@ -522,6 +576,8 @@ class TelemetryState(BaseModel):
     active_workers: int = 0
     elapsed_seconds: float = 0.0
     estimated_cost_usd: float = 0.0
+    active_provider: Optional[str] = "fal.ai"
+    active_api_status: Optional[str] = "Ready"
     worker_tiles: List[TelemetryWorkerTile] = Field(default_factory=list)
 
 
@@ -559,5 +615,188 @@ class ProjectSummary(BaseModel):
     created_at: str
     updated_at: str
     is_legacy: bool = False
+
+
+# --- Feature 010: Multi-Provider Video Routing & Real-Time Cost Arbitrage ---
+
+class ProviderId(str, Enum):
+    FAL_AI = "fal_ai"
+    APIDOT_AI = "apidot_ai"
+    KIE_AI = "kie_ai"
+    RUNPOD_SERVERLESS = "runpod_serverless"
+    AUTO = "auto"
+
+
+class VideoGenerationModality(str, Enum):
+    TEXT_TO_VIDEO = "t2v"
+    IMAGE_TO_VIDEO = "i2v"
+    START_END_INTERPOLATION = "interpolation"
+    VIDEO_EXTEND = "extend"
+
+
+class VideoModelFamily(str, Enum):
+    KLING = "kling"
+    SEEDANCE = "seedance"
+    RUNWAY = "runway"
+    MINIMAX = "minimax"
+    VEO = "veo"
+    WAN = "wan"
+    LUMA = "luma"
+    HUNYUAN = "hunyuan"
+    COGVIDEOX = "cogvideox"
+    PIXVERSE = "pixverse"
+    PIKA = "pika"
+    VIDU = "vidu"
+    MOCHI = "mochi"
+    SORA = "sora"
+    GROK = "grok"
+    FLUX = "flux"
+
+
+class AudioSyntaxType(str, Enum):
+    NONE = "none"
+    MINIMAX_TAG = "minimax_tag"
+    NATURAL_LINE = "natural_line"
+
+
+class NegativePromptStrategy(str, Enum):
+    CINEMATIC_REALISTIC = "cinematic_realistic"
+    ANIMATED_STYLIZED = "animated_stylized"
+    CLEAN_GRAPHICS = "clean_graphics"
+    PASSTHROUGH = "passthrough"
+
+
+class VideoModelProfile(BaseModel):
+    model_id: str
+    display_name: str
+    family: VideoModelFamily
+    version: str
+    hard_char_limit: int
+    safe_char_limit: int
+    token_encoder: str = "T5-XXL"
+    token_limit: Optional[int] = None
+    supports_native_audio: bool = False
+    audio_syntax: AudioSyntaxType = AudioSyntaxType.NONE
+    supports_i2v: bool = True
+    supports_dual_frame: bool = False
+    supports_reference_images: bool = False
+    max_reference_images: int = 0
+    supports_extend: bool = False
+    negative_prompt_strategy: NegativePromptStrategy = NegativePromptStrategy.CINEMATIC_REALISTIC
+    first_frame_param_name: str = "image_url"
+    end_frame_param_name: str = "tail_image_url"
+    reference_param_name: str = "reference_images"
+    supported_providers: List[ProviderId] = Field(default_factory=list)
+    default_duration_sec: float = 5.0
+    allowed_durations: List[float] = Field(default_factory=lambda: [5.0, 10.0])
+    allowed_resolutions: List[str] = Field(default_factory=lambda: ["720p", "1080p"])
+    provider_endpoints: Dict[ProviderId, Dict[str, str]] = Field(default_factory=dict)
+    provider_rates: Dict[ProviderId, float] = Field(default_factory=dict)
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.supports_native_audio and self.audio_syntax == AudioSyntaxType.NONE:
+            if self.family == VideoModelFamily.MINIMAX:
+                self.audio_syntax = AudioSyntaxType.MINIMAX_TAG
+            else:
+                self.audio_syntax = AudioSyntaxType.NATURAL_LINE
+
+
+class CompiledRenderPrompt(BaseModel):
+    positive_prompt: str
+    negative_prompt: str
+    character_count: int
+    token_budget_safe: bool = True
+    is_kinetic_filtered: bool = False
+    audio_markup_applied: bool = False
+    model_id: str
+    modality: VideoGenerationModality = VideoGenerationModality.TEXT_TO_VIDEO
+
+
+class ProviderDocsEntry(BaseModel):
+    provider_id: ProviderId
+    name: str
+    official_docs_url: str
+    pricing_docs_url: str
+    failure_billing_policy: str
+    zero_cost_on_failure: bool = True
+    api_status_url: Optional[str] = None
+    last_verified: str = "2026-10-25"
+
+
+class ProviderPriceQuote(BaseModel):
+    provider_id: ProviderId
+    model_id: str
+    modality: VideoGenerationModality = VideoGenerationModality.TEXT_TO_VIDEO
+    duration_sec: float
+    resolution: str = "720p"
+    native_audio_enabled: bool = False
+    rate_per_sec_usd: float
+    estimated_total_usd: float
+    billing_unit: str = "per_second"
+    is_available: bool = True
+    latency_ms: float = 0.0
+    quote_timestamp: float = Field(default_factory=time.time)
+    ttl_sec: int = 600
+    is_cheapest: bool = False
+    discount_pct: float = 0.0
+    is_promotional: bool = False
+    promo_description: Optional[str] = None
+    free_tier_applicable: bool = False
+
+
+class VideoGenerationRequest(BaseModel):
+    project_id: str
+    beat_index: int
+    model_profile: VideoModelProfile
+    modality: VideoGenerationModality = VideoGenerationModality.TEXT_TO_VIDEO
+    prompt: str
+    negative_prompt: Optional[str] = "blurry, low quality, distorted, jitter"
+    start_frame_path: Optional[str] = None
+    end_frame_path: Optional[str] = None
+    reference_image_paths: List[str] = Field(default_factory=list)
+    reference_assets: List[str] = Field(default_factory=list)
+    duration_sec: float = 5.0
+    aspect_ratio: str = "16:9"
+    resolution: str = "720p"
+    audio_mode: VideoAudioMode = VideoAudioMode.EXTERNAL_SYNTHESIS
+    dialogue_text: Optional[str] = None
+    selected_provider_id: Optional[ProviderId] = None
+    allow_provider_cascade: bool = True
+    parent_video_id: Optional[str] = None
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.reference_image_paths and not self.reference_assets:
+            self.reference_assets = list(self.reference_image_paths)
+        elif self.reference_assets and not self.reference_image_paths:
+            self.reference_image_paths = list(self.reference_assets)
+
+
+class JobExecutionStatus(str, Enum):
+    QUEUED = "QUEUED"
+    SUBMITTED = "SUBMITTED"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    CASCADED = "CASCADED"
+    TIMED_OUT = "TIMED_OUT"
+
+
+class RenderingJobTicket(BaseModel):
+    ticket_id: str = Field(default_factory=lambda: f"ticket_{uuid.uuid4().hex[:10]}")
+    project_id: str
+    beat_index: int
+    provider_id: ProviderId
+    provider_task_id: str
+    model_id: str
+    status: JobExecutionStatus = JobExecutionStatus.QUEUED
+    modality: VideoGenerationModality = VideoGenerationModality.TEXT_TO_VIDEO
+    has_native_audio: bool = False
+    quoted_price_usd: float = 0.0
+    actual_billed_usd: float = 0.0
+    output_video_path: Optional[str] = None
+    error_message: Optional[str] = None
+    submitted_at: float = Field(default_factory=time.time)
+    completed_at: Optional[float] = None
+    retry_count: int = 0
 
 

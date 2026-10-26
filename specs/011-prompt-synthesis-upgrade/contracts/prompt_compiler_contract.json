@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PromptCompilerContract",
+  "description": "Contract for late-stage, model-aware prompt compilation and dynamic negative prompt formulation at render execution time.",
+  "type": "object",
+  "required": [
+    "positive_prompt",
+    "negative_prompt",
+    "character_count",
+    "token_budget_safe",
+    "model_id",
+    "modality"
+  ],
+  "properties": {
+    "positive_prompt": {
+      "type": "string",
+      "description": "The final model-adapted kinetic or visual prompt adhering to the target model's character and token budget."
+    },
+    "negative_prompt": {
+      "type": "string",
+      "description": "Genre-calibrated and model-tailored negative prompt avoiding contradictory photographic or stylistic penalties."
+    },
+    "character_count": {
+      "type": "integer",
+      "description": "Character count of the compiled positive prompt."
+    },
+    "token_budget_safe": {
+      "type": "boolean",
+      "description": "True if the prompt fits within safe_char_limit without unsafe hard clipping."
+    },
+    "is_kinetic_filtered": {
+      "type": "boolean",
+      "description": "True if static attire and environment details were filtered out for I2V modality."
+    },
+    "audio_markup_applied": {
+      "type": "boolean",
+      "description": "True if model-specific speech or dialogue tags (<d> or Spoken line:) were injected."
+    },
+    "model_id": {
+      "type": "string",
+      "description": "Target video model identifier."
+    },
+    "modality": {
+      "type": "string",
+      "enum": ["t2v", "i2v", "interpolation"],
+      "description": "Video generation modality."
+    }
+  }
+}

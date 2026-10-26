@@ -187,7 +187,7 @@ def test_story_writer_cascade_failover(monkeypatch, sample_gemini_json_response)
 
     def mock_query_gemini(self, model_name, api_key, system_prompt, user_prompt):
         attempts.append(model_name)
-        if model_name == "gemini-2.5-flash":
+        if model_name == "gemini-3.8-flash":
             raise RuntimeError("HTTP 429: Resource has been exhausted (quota limit exceeded)")
         return sample_gemini_json_response
 
@@ -197,7 +197,7 @@ def test_story_writer_cascade_failover(monkeypatch, sample_gemini_json_response)
     gateway = StoryWriterGateway(
         ModelCascadeConfig(
             provider=ModelProvider.GEMINI,
-            gemini_models=["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash"],
+            gemini_models=["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite"],
         )
     )
     brief = NarrativeBrief(
@@ -207,10 +207,27 @@ def test_story_writer_cascade_failover(monkeypatch, sample_gemini_json_response)
     result = gateway.synthesize_story(brief)
 
     assert result.fallback_occurred is True
-    assert result.model_used == "gemini-2.5-pro"
-    assert "gemini-2.5-flash" in attempts
-    assert "gemini-2.5-pro" in attempts
+    assert result.model_used == "gemini-3.5-flash"
+    assert "gemini-3.8-flash" in attempts
+    assert "gemini-3.5-flash" in attempts
     assert len(result.error_trace) == 1
     assert "429" in result.error_trace[0]
+
+
+def test_gemini_model_aliasing_and_default_cascade():
+    """Verify that deprecated 2.5/2.0 models forward-alias to 3.8 and default config places 3.8 at Tier 1."""
+    from core.models import resolve_llm_model, ModelCascadeConfig
+
+    cfg = ModelCascadeConfig()
+    assert cfg.gemini_models[0] == "gemini-3.8-flash"
+    assert cfg.gemini_models[1] == "gemini-3.5-flash"
+
+    # Test deprecated model aliasing
+    assert resolve_llm_model("gemini-2.5-flash") == "gemini-3.8-flash"
+    assert resolve_llm_model("gemini-2.5-pro") == "gemini-3.8-flash"
+    assert resolve_llm_model("gemini-2.0-flash") == "gemini-3.8-flash"
+    assert resolve_llm_model("gemini-1.5-flash") == "gemini-3.1-flash-lite"
+    assert resolve_llm_model("gemini-3.8-flash") == "gemini-3.8-flash"
+    assert resolve_llm_model(None) == "gemini-3.8-flash"
 
 

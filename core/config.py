@@ -78,3 +78,26 @@ def get_runpod_serverless_endpoint_id() -> str | None:
 def get_max_serverless_concurrency() -> int:
     """Retrieve maximum concurrent serverless workers (default 4)."""
     return int(os.getenv("MAX_SERVERLESS_CONCURRENCY", "4"))
+
+
+def get_fal_key() -> str | None:
+    """Retrieve fal.ai API key from environment."""
+    val = os.getenv("FAL_KEY") or os.getenv("FAL_API_KEY")
+    return val.strip() if val and val.strip() and not val.strip().startswith("your_") else None
+
+
+def get_apidot_key() -> str | None:
+    """Retrieve APIDot API key from environment."""
+    val = os.getenv("APIDOT_API_KEY") or os.getenv("APIDOT_KEY")
+    return val.strip() if val and val.strip() and not val.strip().startswith("your_") else None
+
+
+def get_kie_key() -> str | None:
+    """Retrieve Kie.ai API key from environment."""
+    val = os.getenv("KIE_API_KEY") or os.getenv("KIE_KEY")
+    return val.strip() if val and val.strip() and not val.strip().startswith("your_") else None
+
+
+def get_provider_timeout_sec() -> int:
+    """Retrieve third-party provider polling timeout in seconds (default 600s = 10m)."""
+    return int(os.getenv("PROVIDER_TIMEOUT_SEC", "600"))

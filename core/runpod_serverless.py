@@ -86,6 +86,25 @@ def ensure_video_duration_coverage(video_path: str, target_duration_sec: float, 
     return video_path
 
 
+def create_looping_preview_clip(image_path: str, output_path: str, duration_sec: float = 5.0) -> str:
+    """Generates an MP4 looping preview clip from a static keyframe image."""
+    import subprocess
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    cmd = [
+        "ffmpeg", "-y",
+        "-loop", "1",
+        "-i", image_path,
+        "-c:v", "libx264",
+        "-t", str(duration_sec),
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        output_path
+    ]
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+    return output_path
+
+
+
 class RunPodServerlessClient:
     """Client for RunPod Serverless API v2."""
 

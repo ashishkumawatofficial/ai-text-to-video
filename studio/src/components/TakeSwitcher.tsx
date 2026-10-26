@@ -22,7 +22,7 @@ export function TakeSwitcher({
   return (
     <div className="take-switcher-container">
       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-        <Film size={12} color="var(--accent-cyan)" />
+        <Film size={12} color="var(--text-muted)" />
         <span className="take-switcher-label">Takes ({takes.length}):</span>
       </div>
 

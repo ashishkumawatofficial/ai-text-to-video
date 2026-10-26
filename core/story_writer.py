@@ -34,6 +34,7 @@ from core.models import (
     SceneBeatPlan,
     StoryWriterResult,
     VideoAspectRatio,
+    resolve_llm_model,
 )
 
 logger = logging.getLogger("ai_pipeline.story_writer")
@@ -84,7 +85,8 @@ class StoryWriterGateway:
         candidates: List[Tuple[str, str, int]] = []  # (provider_name, model_name, tier_level)
 
         if self.config.provider in (ModelProvider.GEMINI, ModelProvider.AUTO) and gemini_keys:
-            for idx, model in enumerate(self.config.gemini_models):
+            for idx, raw_model in enumerate(self.config.gemini_models):
+                model = resolve_llm_model(raw_model)
                 tier = 1 if idx == 0 else (2 if idx <= 2 else 3)
                 candidates.append(("gemini", model, tier))
 
@@ -93,7 +95,8 @@ class StoryWriterGateway:
             candidates.append(("puter", "claude-sonnet", 2))
 
         if self.config.provider in (ModelProvider.OPENAI, ModelProvider.AUTO) and openai_key:
-            for idx, model in enumerate(self.config.openai_models):
+            for idx, raw_model in enumerate(self.config.openai_models):
+                model = resolve_llm_model(raw_model)
                 tier = 1 if idx == 0 else (2 if idx == 1 else 3)
                 candidates.append(("openai", model, tier))
 
@@ -219,18 +222,19 @@ Deconstruct the prompt concept into an original narrative arc with a compelling 
 
         keys = [api_key] if isinstance(api_key, str) else (api_key or [])
         last_error = None
+        resolved_model = resolve_llm_model(model_name)
 
         for key in keys:
             masked = key[:6] + "..." if len(key) > 6 else "***"
             try:
-                client = genai.Client(api_key=key)
+                client = genai.Client(api_key=key, http_options={"timeout": 15000})
                 config = types.GenerateContentConfig(
                     system_instruction=system_prompt,
                     response_mime_type="application/json",
                     temperature=0.7,
                 )
                 response = client.models.generate_content(
-                    model=model_name,
+                    model=resolved_model,
                     contents=user_prompt,
                     config=config,
                 )
@@ -310,8 +314,10 @@ Deconstruct the prompt concept into an original narrative arc with a compelling 
         for scene in plan.scenes:
             if not getattr(scene, "image_prompt", None):
                 scene.image_prompt = scene.visual_prompt
-            if not getattr(scene, "motion_prompt", None):
-                scene.motion_prompt = scene.visual_prompt
+            if not getattr(scene, "motion_prompt", None) or scene.motion_prompt == scene.image_prompt:
+                cam = getattr(scene, "camera_movement", "slow_push_in") or "slow_push_in"
+                cam_str = cam.replace("_", " ").title()
+                scene.motion_prompt = f"{cam_str} camera movement, dynamic subject motion and environmental physics: {scene.visual_prompt}"
 
             # Prepend framing prefix if not already present
             if not any(token in scene.visual_prompt.lower() for token in ["9:16", "16:9", "1:1", "4:5", "widescreen", "portrait focus"]):
@@ -355,6 +361,7 @@ Deconstruct the prompt concept into an original narrative arc with a compelling 
                         s.image_prompt = f"{prefix}. {detected_style}. {s.image_prompt[len(prefix):].lstrip(', ')}"
                     else:
                         s.image_prompt = f"{detected_style}. {s.image_prompt}"
+
 
     def _synthesize_offline_fallback(self, brief: NarrativeBrief) -> DirectorMasterPlan:
         """Deterministic offline narrative synthesizer for pure zero-dependency resilience."""

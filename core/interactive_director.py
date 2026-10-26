@@ -442,7 +442,7 @@ class InteractiveDirector:
                     chain_shots(prev_clip_path, beat, temp_dir=temp_dir)
 
                 clip_dest = os.path.join(temp_dir, f"beat_{beat.beat_index}.mp4")
-                route_and_execute_beat(beat, output_video_path=clip_dest, comfy_client=self.comfy_client, backend=backend)
+                route_and_execute_beat(beat, output_video_path=clip_dest, comfy_client=self.comfy_client, backend=backend, progress_cb=progress_cb)
                 if beat.output_video_path and os.path.exists(beat.output_video_path):
                     beat.output_video_path = ensure_video_duration_coverage(beat.output_video_path, beat.duration_sec)
                     prev_clip_path = beat.output_video_path

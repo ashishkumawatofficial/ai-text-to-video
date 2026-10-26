@@ -213,7 +213,9 @@ async def test_chain_frame_consecutive_shots(mock_session):
     assert chain_data["status"] == "chained"
     assert chain_data["source_beat_index"] == 0
     assert chain_data["target_beat_index"] == 1
-    assert os.path.exists(chain_data["chained_frame_path"].lstrip("/"))
+    from core.server import _resolve_media_to_disk_path
+    disk_path = _resolve_media_to_disk_path(session_id, chain_data["chained_frame_path"])
+    assert disk_path is not None and os.path.exists(disk_path)
 
     # 4. Verify target card state
     target_card = chain_data["target_card"]

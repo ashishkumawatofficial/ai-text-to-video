@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Video, Cpu, Sparkles, ChevronLeft } from 'lucide-react';
+import { Video, Cpu, Sparkles, ChevronLeft, Zap } from 'lucide-react';
 import {
   StudioSession,
   TelemetryState,
@@ -7,6 +7,7 @@ import {
   generateStoryboard,
   rerollBeat,
   uploadBeatImage,
+  removeBeatFrame,
   sendDirectorChat,
   startRender,
   cancelRender,
@@ -107,16 +108,18 @@ export function App() {
   };
 
   // Storyboard Planning Generator
-  const handleGenerateStoryboard = async () => {
+  const handleGenerateStoryboard = async (preserveSessionId: boolean = false) => {
     if (!prompt.trim()) return;
     setIsGenerating(true);
     try {
+      const targetSessionId = preserveSessionId && session ? session.session_id : undefined;
       const newSession = await generateStoryboard(
         prompt,
         aspectRatio,
         directingMode,
         backend,
-        voicePersona
+        voicePersona,
+        targetSessionId
       );
       setSession(newSession);
       setProjectTitle(newSession.title || prompt.slice(0, 36) || 'Untitled Video');
@@ -125,9 +128,9 @@ export function App() {
       const url = new URL(window.location.href);
       url.searchParams.set('project', newSession.session_id);
       window.history.pushState({}, '', url.toString());
-    } catch (err) {
+    } catch (err: any) {
       console.error('Storyboard generation error:', err);
-      alert('Failed to generate storyboard plan. Ensure backend is running.');
+      alert(err?.message || 'Failed to generate storyboard plan. Ensure backend is running.');
     } finally {
       setIsGenerating(false);
     }
@@ -153,11 +156,15 @@ export function App() {
     }
   };
 
-  // Custom Keyframe Upload
-  const handleUploadBeatImage = async (beatIndex: number, file: File) => {
+  // Custom Keyframe / End Frame / Reference Image Upload
+  const handleUploadBeatImage = async (
+    beatIndex: number,
+    file: File,
+    frameType: 'start_frame' | 'end_frame' | 'reference_image' = 'start_frame'
+  ) => {
     if (!session) return;
     try {
-      const updatedCard = await uploadBeatImage(session.session_id, beatIndex, file);
+      const updatedCard = await uploadBeatImage(session.session_id, beatIndex, file, frameType);
       setSession((prev) => {
         if (!prev) return prev;
         const newBeats = [...prev.beats];
@@ -169,11 +176,35 @@ export function App() {
       });
     } catch (err) {
       console.error('Image upload error:', err);
-      alert(`Failed to upload custom image for beat ${beatIndex + 1}.`);
+      alert(`Failed to upload ${frameType.replace('_', ' ')} for beat ${beatIndex + 1}.`);
     }
   };
 
-  // Directorial Beat Updates (Speaker, Voice Persona, Prompt, Dialogue)
+  // Remove Frame or Reference Image
+  const handleRemoveBeatFrame = async (
+    beatIndex: number,
+    frameType: 'start_frame' | 'end_frame' | 'reference_image',
+    imageIndex?: number
+  ) => {
+    if (!session) return;
+    try {
+      const updatedCard = await removeBeatFrame(session.session_id, beatIndex, frameType, imageIndex);
+      setSession((prev) => {
+        if (!prev) return prev;
+        const newBeats = [...prev.beats];
+        const targetIdx = newBeats.findIndex((b) => b.beat_index === beatIndex);
+        if (targetIdx !== -1) {
+          newBeats[targetIdx] = updatedCard;
+        }
+        return { ...prev, beats: newBeats };
+      });
+    } catch (err) {
+      console.error('Remove frame error:', err);
+      alert(`Failed to remove ${frameType.replace('_', ' ')} for beat ${beatIndex + 1}.`);
+    }
+  };
+
+  // Directorial Beat Updates (Speaker, Voice Persona, Prompt, Dialogue, Routing)
   const handleUpdateBeat = async (beatIndex: number, updates: any) => {
     if (!session) return;
     try {
@@ -187,6 +218,12 @@ export function App() {
         imagePrompt: updates.image_prompt,
         motionPrompt: updates.motion_prompt,
         cameraMotion: updates.camera_motion,
+        modelId: updates.model_id,
+        providerOverride: updates.provider_override,
+        resolution: updates.resolution,
+        modality: updates.modality,
+        nativeAudio: updates.native_audio ?? updates.has_clip_audio,
+        allowProviderCascade: updates.allow_provider_cascade ?? updates.allowProviderCascade,
       });
       setSession((prev) => {
         if (!prev) return prev;
@@ -202,9 +239,11 @@ export function App() {
     }
   };
 
-  // Single-Beat Video Render (Multi-Take Recording)
+  // Single-Beat Video Render (Multi-Take Recording with selected Model, Provider, Resolution, Modality)
   const handleRenderBeat = async (beatIndex: number) => {
     if (!session) return;
+    const targetCard = session.beats.find((b) => b.beat_index === beatIndex);
+
     try {
       setSession((prev) => {
         if (!prev) return prev;
@@ -216,7 +255,17 @@ export function App() {
         return { ...prev, beats: newBeats };
       });
 
-      const res = await renderBeat(session.session_id, beatIndex, backend);
+      const res = await renderBeat(
+        session.session_id,
+        beatIndex,
+        backend,
+        targetCard?.model_id,
+        targetCard?.provider_override,
+        targetCard?.resolution,
+        targetCard?.modality,
+        targetCard?.native_audio ?? targetCard?.has_clip_audio,
+        targetCard?.allow_provider_cascade
+      );
       setSession((prev) => {
         if (!prev) return prev;
         const newBeats = [...prev.beats];
@@ -342,9 +391,9 @@ export function App() {
       if (res.session.aspect_ratio) {
         setAspectRatio(res.session.aspect_ratio);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Chat error:', err);
-      alert('Failed to send director note.');
+      alert(`Failed to send director note: ${err?.message || 'Server error'}`);
     }
   };
 
@@ -445,15 +494,26 @@ export function App() {
           <span style={{ color: 'var(--border-subtle)' }}>|</span>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Cpu size={14} color="var(--accent-cyan)" />
+            <Cpu size={14} color="var(--text-muted)" />
             <span>Serverless: {healthStatus?.serverless_healthy ? 'Ready (RTX 4090/A5000)' : 'Connected'}</span>
           </div>
 
           <span style={{ color: 'var(--border-subtle)' }}>|</span>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Sparkles size={14} color="var(--accent-purple)" />
+            <Sparkles size={14} color="var(--text-muted)" />
             <span>Gemini Director: {healthStatus?.gemini_active ? 'Active' : 'Offline'}</span>
+          </div>
+
+          <span style={{ color: 'var(--border-subtle)' }}>|</span>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Zap size={14} color={isRendering ? 'var(--accent-blue)' : 'var(--accent-emerald)'} className={isRendering ? 'spin-slow' : ''} />
+            <span style={{ color: isRendering ? 'var(--accent-blue)' : 'inherit' }}>
+              {isRendering
+                ? `Video API: ${session?.telemetry?.active_provider || 'fal.ai'} [${session?.telemetry?.active_api_status || 'IN_PROGRESS'}]`
+                : 'Video API: Gateway Online'}
+            </span>
           </div>
         </div>
       </header>
@@ -481,6 +541,7 @@ export function App() {
           isGenerating={isGenerating}
           isRendering={isRendering}
           hasStoryboard={Boolean(session && session.beats.length > 0)}
+          savedConceptPrompt={session?.concept_prompt}
         />
 
         {/* Column 2: Visual Storyboard Canvas */}
@@ -492,6 +553,7 @@ export function App() {
           onSelectTake={handleSelectTake}
           onRerollBeat={handleRerollBeat}
           onUploadBeatImage={handleUploadBeatImage}
+          onRemoveBeatFrame={handleRemoveBeatFrame}
           onUpdateCard={handleUpdateBeat}
           onRenderBeat={handleRenderBeat}
           onChainFrame={handleChainFrame}
@@ -511,6 +573,7 @@ export function App() {
 
           <TelemetryGrid
             telemetry={telemetry}
+            beats={session?.beats || []}
             isRendering={isRendering}
             onCancelRender={handleCancelRender}
           />

@@ -51,3 +51,54 @@ def test_patch_storyboard_beat_updates_card(client):
     updated_card = _ACTIVE_SESSIONS[session_id].beats[0]
     assert updated_card.speaker == "Barnaby the Bull"
     assert updated_card.voice_actor == "cartoon_animal"
+
+
+def test_patch_storyboard_beat_routing_fields(client):
+    session_id = "test-session-patch-routing"
+    test_session = StudioSession(
+        session_id=session_id,
+        concept_prompt="Cyberpunk detective walking",
+        aspect_ratio="16:9",
+        directing_mode=DirectingMode.PRO,
+        backend_strategy=BackendExecutionStrategy.SERVERLESS,
+        beats=[
+            StoryboardCard(
+                beat_id="beat_0",
+                beat_index=0,
+                visual_prompt="Detective in trenchcoat",
+                model_id="kling-v1.5",
+                provider_override="auto",
+                resolution="720p",
+                modality="t2v",
+                native_audio=False,
+            )
+        ]
+    )
+    _ACTIVE_SESSIONS[session_id] = test_session
+
+    payload = {
+        "session_id": session_id,
+        "beat_index": 0,
+        "model_id": "wan-3.0",
+        "provider_override": "kie_ai",
+        "resolution": "480p",
+        "modality": "i2v",
+        "native_audio": True,
+    }
+    response = client.patch("/api/storyboard/beat", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "updated"
+    assert data["beat"]["model_id"] == "wan-3.0"
+    assert data["beat"]["provider_override"] == "kie_ai"
+    assert data["beat"]["resolution"] == "480p"
+    assert data["beat"]["modality"] == "i2v"
+    assert data["beat"]["native_audio"] is True
+
+    card = _ACTIVE_SESSIONS[session_id].beats[0]
+    assert card.model_id == "wan-3.0"
+    assert card.provider_override == "kie_ai"
+    assert card.resolution == "480p"
+    assert card.modality == "i2v"
+    assert card.native_audio is True
+

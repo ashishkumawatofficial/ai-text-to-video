@@ -22,6 +22,8 @@ export interface SceneConfig {
   durationInFrames: number;
   type: SceneType;
   mediaSrc?: string;
+  hasClipAudio?: boolean;
+  audioVolume?: number;
   spriteOverlays?: SpriteOverlayConfig[];
   timerConfig?: {
     countdownSeconds?: number;

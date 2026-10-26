@@ -46,7 +46,7 @@ def run_api_verification() -> List[Dict[str, Any]]:
         for idx, key in enumerate(gemini_keys):
             masked = key[:6] + "..." if len(key) > 6 else "***"
             t0 = time.time()
-            models_to_test = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"]
+            models_to_test = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"]
             succeeded_model = None
             last_err = None
 

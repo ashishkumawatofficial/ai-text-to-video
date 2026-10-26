@@ -7,7 +7,7 @@ import uuid
 import shutil
 import subprocess
 from typing import Dict, Any, Optional
-from core.models import VideoProject, VisualStrategyRoute, ImageRole
+from core.models import VideoProject, VisualStrategyRoute, ImageRole, VideoAudioMode
 
 
 REMOTION_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "remotion"))
@@ -58,12 +58,20 @@ def build_remotion_props(project: VideoProject) -> Dict[str, Any]:
             elif beat.visual_strategy == VisualStrategyRoute.PROGRAMMATIC_HYBRID:
                 scene_type = "static_plate"
 
+        has_clip_audio = bool(
+            getattr(beat, 'has_native_audio', False)
+            or (getattr(beat, 'audio_mode', None) == VideoAudioMode.NATIVE_CLIP_AUDIO)
+            or (getattr(beat, 'audio_mode', None) == "native_clip_audio")
+        )
+
         scenes_payload.append({
             "id": f"scene_{beat.beat_index}",
             "startFrame": current_frame,
             "durationInFrames": duration_frames,
             "type": scene_type,
-            "mediaSrc": media_src
+            "mediaSrc": media_src,
+            "hasClipAudio": has_clip_audio,
+            "audioVolume": 1.0 if has_clip_audio else 0.0,
         })
 
         current_frame += duration_frames

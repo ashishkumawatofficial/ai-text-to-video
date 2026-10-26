@@ -31,6 +31,9 @@ yarn-error.log*
 .pnpm-debug.log*
 remotion/dist/
 remotion/build/
+remotion/out/
+remotion/public/media/*
+!remotion/public/media/.gitkeep
 remotion/.remotion/
 studio/dist/
 

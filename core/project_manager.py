@@ -103,6 +103,7 @@ class ProjectManager:
         dirs = {
             "root": proj_dir,
             "keyframes": self.get_media_dir(project_id, "keyframes"),
+            "references": self.get_media_dir(project_id, "references"),
             "audio": self.get_media_dir(project_id, "audio"),
             "clips": self.get_media_dir(project_id, "clips"),
             "exports": self.get_media_dir(project_id, "exports"),
@@ -173,6 +174,47 @@ class ProjectManager:
         self.save_project(session)
         return session
 
+    def _normalize_single_path(self, project_id: str, path: str) -> str:
+        if not path:
+            return path
+        if path.startswith("http://") or path.startswith("https://"):
+            return path
+        if path.startswith(f"/api/projects/{project_id}/media/"):
+            return path
+        if "/media/" in path:
+            idx = path.find("/media/")
+            rest = path[idx + len("/media/"):]
+            parts = rest.split("/")
+            if len(parts) >= 2:
+                subfolder = parts[0]
+                filename = "/".join(parts[1:])
+                return f"/api/projects/{project_id}/media/{subfolder}/{filename}"
+        return path
+
+    def _normalize_session_media_paths(self, session: StudioSession) -> StudioSession:
+        """Normalizes any media paths (e.g. unroutable /../../Desktop/... or relative paths) to standard /api/projects/ URLs."""
+        if not session or not session.beats:
+            return session
+        
+        pid = session.session_id
+        for card in session.beats:
+            if card.keyframe_path:
+                card.keyframe_path = self._normalize_single_path(pid, card.keyframe_path)
+            if card.start_frame_path:
+                card.start_frame_path = self._normalize_single_path(pid, card.start_frame_path)
+            if card.end_frame_path:
+                card.end_frame_path = self._normalize_single_path(pid, card.end_frame_path)
+            if card.output_video_path:
+                card.output_video_path = self._normalize_single_path(pid, card.output_video_path)
+            if card.reference_image_paths:
+                card.reference_image_paths = [
+                    self._normalize_single_path(pid, p) for p in card.reference_image_paths if p
+                ]
+            for take in card.takes:
+                if take.video_path:
+                    take.video_path = self._normalize_single_path(pid, take.video_path)
+        return session
+
     def get_project(self, project_id: str) -> Optional[StudioSession]:
         """Loads a project state from outputs/projects/ or seamlessly from legacy sessions."""
         # 1. Check dedicated projects folder
@@ -181,7 +223,8 @@ class ProjectManager:
             try:
                 with open(proj_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                return StudioSession.model_validate(data)
+                sess = StudioSession.model_validate(data)
+                return self._normalize_session_media_paths(sess)
             except Exception:
                 pass
 
@@ -195,11 +238,12 @@ class ProjectManager:
                 # Check if it's already a StudioSession format
                 if "beats" in data:
                     sess = StudioSession.model_validate(data)
-                    return sess
+                    return self._normalize_session_media_paths(sess)
                 
                 # Otherwise, adapt from StoryboardSession model
                 sb_session = StoryboardSession.model_validate(data)
-                return self._adapt_legacy_session(sb_session)
+                adapted = self._adapt_legacy_session(sb_session)
+                return self._normalize_session_media_paths(adapted)
             except Exception:
                 pass
 
